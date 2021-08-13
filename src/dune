@@ -1,0 +1,11 @@
+(library
+ (name happy_eyeballs)
+ (public_name happy-eyeballs)
+ (modules happy_eyeballs)
+ (libraries dns domain-name ipaddr fmt duration))
+
+(library
+ (name happy_eyeballs_lwt)
+ (public_name happy-eyeballs.lwt)
+ (modules happy_eyeballs_lwt)
+ (libraries logs rresult dns-client.lwt lwt lwt.unix happy-eyeballs))

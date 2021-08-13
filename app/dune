@@ -1,0 +1,4 @@
+(executable
+ (name test)
+ (modules test)
+ (libraries logs.fmt fmt.cli logs.cli fmt.tty cmdliner happy_eyeballs_lwt))
