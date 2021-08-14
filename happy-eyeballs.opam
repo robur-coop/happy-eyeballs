@@ -1,0 +1,29 @@
+opam-version: "2.0"
+maintainer: "Robur <team@robur.coop>"
+authors: ["Robur <team@robur.coop>"]
+homepage: "https://github.com/roburio/happy-eyeballs"
+dev-repo: "git+https://github.com/roburio/happy-eyeballs.git"
+bug-reports: "https://github.com/roburio/happy-eyeballs/issues"
+license: "ISC"
+
+depends: [
+  "ocaml" {>= "4.08.0"}
+  "dune" {>= "2.0.0"}
+  "cmdliner"
+  "duration"
+  "dns"
+  "dns-client"
+  "domain-name"
+  "ipaddr"
+  "fmt"
+  "logs"
+  "lwt"
+  "mtime"
+  "rresult"
+]
+build: [
+  ["dune" "subst"] {dev}
+  ["dune" "build" "-p" name "-j" jobs]
+]
+
+synopsis: "Connecting to a remote host"
