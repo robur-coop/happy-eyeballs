@@ -11,7 +11,7 @@ let now = Mtime_clock.elapsed_ns
 module IM = Map.Make(Int)
 
 type t = {
-  mutable waiters : (Ipaddr.t * Lwt_unix.file_descr, [ `Msg of string ]) result Lwt.u IM.t ;
+  mutable waiters : ((Ipaddr.t * int) * Lwt_unix.file_descr, [ `Msg of string ]) result Lwt.u IM.t ;
   mutable he : Happy_eyeballs.t ;
   dns : Dns_client_lwt.t ;
 }
@@ -57,32 +57,32 @@ let rec act t action =
       begin
         Dns_client_lwt.getaddrinfo t.dns Dns.Rr_map.A host >|= function
         | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_a (host, res))
-        | Error _ -> Error ()
+        | Error _ -> Ok (Happy_eyeballs.Resolved_a_failed host)
       end
     | Happy_eyeballs.Resolve_aaaa host ->
       begin
         Dns_client_lwt.getaddrinfo t.dns Dns.Rr_map.Aaaa host >|= function
         | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_aaaa (host, res))
-        | Error _ -> Error ()
+        | Error _ -> Ok (Happy_eyeballs.Resolved_aaaa_failed host)
       end
-    | Happy_eyeballs.Connect (host, id, ip, port) ->
+    | Happy_eyeballs.Connect (host, id, (ip, port)) ->
       begin
         try_connect ip port >>= function
         | Ok fd ->
           begin match IM.find_opt id t.waiters with
             | Some waiter ->
               t.waiters <- IM.remove id t.waiters;
-              Lwt.wakeup_later waiter (Ok (ip, fd));
-              Lwt.return (Ok (Happy_eyeballs.Connected (host, id, ip, port)))
+              Lwt.wakeup_later waiter (Ok ((ip, port), fd));
+              Lwt.return (Ok (Happy_eyeballs.Connected (host, id, (ip, port))))
             | None ->
               (* waiter already vanished *)
               safe_close fd >>= fun () ->
               Lwt.return (Error ())
           end
         | Error _ ->
-          Lwt.return (Ok (Happy_eyeballs.Connection_failed (host, id, ip, port)))
+          Lwt.return (Ok (Happy_eyeballs.Connection_failed (host, id, (ip, port))))
       end
-    | Happy_eyeballs.Connect_failed (_host, id, _port) ->
+    | Happy_eyeballs.Connect_failed (_host, id) ->
       begin match IM.find_opt id t.waiters with
         | Some waiter ->
           t.waiters <- IM.remove id t.waiters;
@@ -124,21 +124,28 @@ let create () =
 let handle_actions t actions =
   List.iter (fun a -> Lwt.async (fun () -> act t a)) actions
 
-let connect t host port =
+let connect t host ports =
   let open Lwt_result.Infix in
-  match Ipaddr.of_string host with
-  | Ok ip -> try_connect ip port >|= fun fd -> ip, fd
-  | Error _ ->
-    match
-      let open Rresult.R.Infix in
-      Domain_name.of_string host >>= fun dn ->
-      Domain_name.host dn
-    with
-    | Error e -> Lwt_result.fail e
-    | Ok host ->
-      let waiter, notify = Lwt.task () in
-      let id = register_waiter t notify in
-      let he, actions = Happy_eyeballs.connect t.he (now ()) ~id host port in
-      t.he <- he;
-      handle_actions t actions;
-      waiter
+  Lwt_result.lift
+    (let open Rresult.R.Infix in
+     match Ipaddr.of_string host with
+     | Ok ip -> Ok (`Ip ip)
+     | Error _ ->
+       Domain_name.of_string host >>= fun dn ->
+       Domain_name.host dn >>| fun host ->
+       `Host host) >>= fun r ->
+  let waiter, notify = Lwt.task () in
+  let id = register_waiter t notify in
+  let ts = now () in
+  let he, actions = match r with
+    | `Ip ip -> Happy_eyeballs.connect_ip t.he ts ~id [ip] ports
+    | `Host host -> Happy_eyeballs.connect t.he ts ~id host ports
+  in
+  t.he <- he;
+  handle_actions t actions;
+  let open Lwt.Infix in
+  waiter >|= fun r ->
+  Logs.debug (fun m -> m "connection %s to %s after %a"
+                 (match r with Ok _ -> "ok" | Error _ -> "failed")
+                 host Duration.pp (Int64.sub (now ()) ts));
+  r

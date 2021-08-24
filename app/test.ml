@@ -1,12 +1,13 @@
 open Lwt.Infix
 
-let jump () host port =
+let jump () host ports =
   let t = Happy_eyeballs_lwt.create () in
   Lwt_main.run (
-    Logs.app (fun m -> m "connecting to %s" host);
-    Happy_eyeballs_lwt.connect t host port >>= function
-    | Ok (ip, fd) ->
-      Logs.app (fun m -> m "connected to %a" Ipaddr.pp ip);
+    Logs.app (fun m -> m "connecting to %s (on ports %a)" host
+                 Fmt.(list ~sep:(unit ", ") int) ports);
+    Happy_eyeballs_lwt.connect t host ports >>= function
+    | Ok ((ip, port), fd) ->
+      Logs.app (fun m -> m "connected to %a:%d" Ipaddr.pp ip port);
       Lwt_unix.close fd >|= fun () ->
       Ok ()
     | Error `Msg msg as e ->
@@ -30,8 +31,8 @@ let host =
   Arg.(required & pos 0 (some string) None & info [] ~doc ~docv:"HOST")
 
 let port =
-  let doc = "Port to connect to" in
-  Arg.(value & opt int 80 & info [ "port" ] ~doc ~docv:"PORT")
+  let doc = "Ports to connect to" in
+  Arg.(value & opt_all int [443;80] & info [ "port" ] ~doc ~docv:"PORT")
 
 let cmd =
   Term.(term_result (const jump $ setup_log $ host $ port)),
