@@ -7,7 +7,7 @@ bug-reports: "https://github.com/roburio/happy-eyeballs/issues"
 license: "ISC"
 
 depends: [
-  "ocaml" {>= "4.08.0"}
+  "ocaml" {>= "4.10.0"}
   "dune" {>= "2.0.0"}
   "happy-eyeballs" {=version}
   "cmdliner"
