@@ -1,3 +1,8 @@
+module Ip_set = Set.Make(Ipaddr)
+
+module Ipv4_set = Set.Make(Ipaddr.V4)
+
+module Ipv6_set = Set.Make(Ipaddr.V6)
 
 let src = Logs.Src.create "happy-eyeballs" ~doc:"Happy Eyeballs"
 module Log = (val Logs.src_log src : Logs.LOG)
@@ -46,7 +51,7 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 type conn_state =
   | Resolving
-  | Waiting_for_aaaa of int64 * Dns.Rr_map.Ipv4_set.t (* TODO ensure non-empty set *)
+  | Waiting_for_aaaa of int64 * Ipv4_set.t (* TODO ensure non-empty set *)
   | Connecting of int64 * (Ipaddr.t * int) * (Ipaddr.t * int) list
 
 type connection = {
@@ -87,8 +92,8 @@ let pp_action ppf = function
 
 (* it likely makes sense to record resolving_failed events as well *)
 type event =
-  | Resolved_a of [`host] Domain_name.t * Dns.Rr_map.Ipv4_set.t
-  | Resolved_aaaa of [`host] Domain_name.t * Dns.Rr_map.Ipv6_set.t
+  | Resolved_a of [`host] Domain_name.t * Ipv4_set.t
+  | Resolved_aaaa of [`host] Domain_name.t * Ipv6_set.t
   | Resolved_a_failed of [`host] Domain_name.t
   | Resolved_aaaa_failed of [`host] Domain_name.t
   | Connection_failed of [`host] Domain_name.t * int * (Ipaddr.t * int)
@@ -98,11 +103,11 @@ let pp_event ppf = function
   | Resolved_a (host, ips) ->
     Fmt.pf ppf "resolved A %a: %a" Domain_name.pp host
       Fmt.(list ~sep:(unit ", ") Ipaddr.V4.pp)
-      (Dns.Rr_map.Ipv4_set.elements ips)
+      (Ipv4_set.elements ips)
   | Resolved_aaaa (host, ips) ->
     Fmt.pf ppf "resolved AAAA %a: %a" Domain_name.pp host
       Fmt.(list ~sep:(unit ", ") Ipaddr.V6.pp)
-      (Dns.Rr_map.Ipv6_set.elements ips)
+      (Ipv6_set.elements ips)
   | Resolved_a_failed host ->
     Fmt.pf ppf "resolve A failed for %a" Domain_name.pp host
   | Resolved_aaaa_failed host ->
@@ -136,8 +141,7 @@ let expand_list ips ports =
   List.concat_map (fun ip -> List.map (fun p -> (ip, p)) ports) ips
 
 let tick now host id conn =
-  let open Rresult.R.Infix in
-  begin
+  match
     match conn.state with
     | Resolving ->
       if Int64.sub now conn.created > resolve_timeout then
@@ -149,7 +153,7 @@ let tick now host id conn =
                     (Int64.sub now started) aaaa_timeout);
       if Int64.sub now started > aaaa_timeout then
         let ips =
-          List.map (fun ip -> Ipaddr.V4 ip) (Dns.Rr_map.Ipv4_set.elements ips)
+          List.map (fun ip -> Ipaddr.V4 ip) (Ipv4_set.elements ips)
         in
         begin match expand_list ips conn.ports with
           | dst :: dsts ->
@@ -167,8 +171,9 @@ let tick now host id conn =
           Ok (Connecting (now, dst, dsts), [ Connect (host, id, dst) ])
       else
         Ok (Connecting (started, dst, dsts), [])
-  end >>| fun (state, actions) ->
-  { conn with state }, actions
+  with
+  | Ok (state, actions) -> Ok ({ conn with state }, actions)
+  | Error () -> Error ()
 
 let timer t now =
   Log.debug (fun m -> m "timer");
@@ -194,13 +199,10 @@ let connect t now ~id host ports =
   { t with conns = add_conn host id conn t.conns },
   [ Resolve_aaaa host ; Resolve_a host ]
 
-let merge
-    ?(ipv4 = Dns.Rr_map.Ipv4_set.empty)
-    ?(ipv6 = Dns.Rr_map.Ipv6_set.empty)
-    ips =
+let merge ?(ipv4 = Ipv4_set.empty) ?(ipv6 = Ipv6_set.empty) ips =
   List.fold_left (fun (ipv4, ipv6) -> function
-      | Ipaddr.V4 ip -> Dns.Rr_map.Ipv4_set.add ip ipv4, ipv6
-      | Ipaddr.V6 ip -> ipv4, Dns.Rr_map.Ipv6_set.add ip ipv6)
+      | Ipaddr.V4 ip -> Ipv4_set.add ip ipv4, ipv6
+      | Ipaddr.V6 ip -> ipv4, Ipv6_set.add ip ipv6)
     (ipv4, ipv6) ips
 
 let shuffle first v4 v6 =
@@ -224,20 +226,19 @@ let shuffle first v4 v6 =
 let mix ?first ?ipv4 ?ipv6 ips =
   let ipv4, ipv6 = merge ?ipv4 ?ipv6 ips in
   let v4, v6 =
-    Dns.Rr_map.Ipv4_set.fold (fun ip acc -> Ipaddr.V4 ip :: acc) ipv4 [],
-    Dns.Rr_map.Ipv6_set.fold (fun ip acc -> Ipaddr.V6 ip :: acc) ipv6 []
+    Ipv4_set.fold (fun ip acc -> Ipaddr.V4 ip :: acc) ipv4 [],
+    Ipv6_set.fold (fun ip acc -> Ipaddr.V6 ip :: acc) ipv6 []
   in
   let first =
     match first with Some Ipaddr.V4 _ | None -> `V6 | Some Ipaddr.V6 _ -> `V4
   in
   shuffle first v4 v6
 
-let mix_dst_with_ips
-    ?(ipv4 = Dns.Rr_map.Ipv4_set.empty) ?(ipv6 = Dns.Rr_map.Ipv6_set.empty)
+let mix_dst_with_ips ?(ipv4 = Ipv4_set.empty) ?(ipv6 = Ipv6_set.empty)
     ports dst dsts =
   let v4_present, v6_present = merge (List.map fst (dst :: dsts)) in
-  let ipv4 = Dns.Rr_map.Ipv4_set.diff ipv4 v4_present
-  and ipv6 = Dns.Rr_map.Ipv6_set.diff ipv6 v6_present
+  let ipv4 = Ipv4_set.diff ipv4 v4_present
+  and ipv6 = Ipv6_set.diff ipv6 v6_present
   in
   let v4_dsts, v6_dsts =
     List.fold_left (fun (ipv4, ipv6) -> function
@@ -246,17 +247,11 @@ let mix_dst_with_ips
       ([], []) dsts
   in
   let fresh_v4, fresh_v6 =
-    expand_list
-      (Dns.Rr_map.Ipv4_set.fold (fun ip acc -> Ipaddr.V4 ip :: acc) ipv4 [])
-      ports,
-    expand_list
-      (Dns.Rr_map.Ipv6_set.fold (fun ip acc -> Ipaddr.V6 ip :: acc) ipv6 [])
-      ports
+    expand_list (Ipv4_set.fold (fun ip acc -> Ipaddr.V4 ip :: acc) ipv4 []) ports,
+    expand_list (Ipv6_set.fold (fun ip acc -> Ipaddr.V6 ip :: acc) ipv6 []) ports
   in
   let first = match fst dst with Ipaddr.V4 _ -> `V6 | Ipaddr.V6 _ -> `V4 in
   shuffle first (List.rev v4_dsts @ fresh_v4) (List.rev v6_dsts @ fresh_v6)
-
-module Ip_set = Set.Make(Ipaddr)
 
 let connect_ip t now ~id ips ports =
   match expand_list (mix (Ip_set.elements ips)) ports with
@@ -285,8 +280,7 @@ let event t now e =
               | Resolving ->
                 if resolved = `both then
                   let ips =
-                    List.map (fun ip -> Ipaddr.V4 ip)
-                      (Dns.Rr_map.Ipv4_set.elements ips)
+                    List.map (fun ip -> Ipaddr.V4 ip) (Ipv4_set.elements ips)
                   in
                   begin match expand_list ips c.ports with
                     | dst :: dsts ->
@@ -298,8 +292,8 @@ let event t now e =
               | Waiting_for_aaaa (ts, ips') ->
                 Logs.warn (fun m -> m "already waiting for AAAA with %a"
                               Fmt.(list ~sep:(unit ", ") Ipaddr.V4.pp)
-                              (Dns.Rr_map.Ipv4_set.elements ips'));
-                Waiting_for_aaaa (ts, Dns.Rr_map.Ipv4_set.union ips' ips), actions
+                              (Ipv4_set.elements ips'));
+                Waiting_for_aaaa (ts, Ipv4_set.union ips' ips), actions
               | Connecting (ts, dst, dsts) ->
                 let dsts = mix_dst_with_ips ~ipv4:ips c.ports dst dsts in
                 Connecting (ts, dst, dsts), actions
@@ -382,7 +376,7 @@ let event t now e =
               cs, Connect_failed (name, id) :: actions
             | Waiting_for_aaaa (_ts, ips) ->
               let ips =
-                List.map (fun ip -> Ipaddr.V4 ip) (Dns.Rr_map.Ipv4_set.elements ips)
+                List.map (fun ip -> Ipaddr.V4 ip) (Ipv4_set.elements ips)
               in
               begin match expand_list ips c.ports with
                 | dst :: dsts ->

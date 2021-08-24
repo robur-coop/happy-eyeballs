@@ -9,11 +9,17 @@ license: "ISC"
 depends: [
   "ocaml" {>= "4.08.0"}
   "dune" {>= "2.0.0"}
+  "happy-eyeballs" {=version}
+  "cmdliner"
   "duration"
+  "dns"
+  "dns-client"
   "domain-name"
   "ipaddr"
   "fmt"
   "logs"
+  "lwt"
+  "mtime"
   "rresult"
 ]
 build: [

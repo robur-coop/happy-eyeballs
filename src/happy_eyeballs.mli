@@ -1,3 +1,11 @@
+module Ip_set : Set.S with type elt = Ipaddr.t
+(** The module of a set of IP addresses. *)
+
+module Ipv4_set : Set.S with type elt = Ipaddr.V4.t
+(** The module of a set of IPv4 addresses. *)
+
+module Ipv6_set : Set.S with type elt = Ipaddr.V6.t
+(** The module of a set of IPv6 addresses. *)
 
 (** The internal state of happy eyeballs. *)
 type t
@@ -14,8 +22,8 @@ val pp_action : action Fmt.t
 
 (** The variant of events. *)
 type event =
-  | Resolved_a of [`host] Domain_name.t * Dns.Rr_map.Ipv4_set.t
-  | Resolved_aaaa of [`host] Domain_name.t * Dns.Rr_map.Ipv6_set.t
+  | Resolved_a of [`host] Domain_name.t * Ipv4_set.t
+  | Resolved_aaaa of [`host] Domain_name.t * Ipv6_set.t
   | Resolved_a_failed of [`host] Domain_name.t
   | Resolved_aaaa_failed of [`host] Domain_name.t
   | Connection_failed of [`host] Domain_name.t * int * (Ipaddr.t * int)
@@ -38,8 +46,6 @@ val connect : t -> int64 -> id:int -> [`host] Domain_name.t -> int list ->
 (** [connect t ts ~id host ports] attempts a connection to [host], where the
     [ports] are attempted in sequence. It results in an updated [t] and a list
     of actions to be performed. *)
-
-module Ip_set : Set.S with type elt = Ipaddr.t
 
 val connect_ip : t -> int64 -> id:int -> Ip_set.t -> int list ->
   t * action list

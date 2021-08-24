@@ -1,4 +1,6 @@
 (executable
  (name test)
+ (public_name happy_eyeballs_client)
  (modules test)
+ (package happy-eyeballs-lwt)
  (libraries logs.fmt fmt.cli logs.cli fmt.tty cmdliner happy_eyeballs_lwt))
