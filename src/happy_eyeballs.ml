@@ -137,8 +137,11 @@ let connect_timeout = Duration.of_sec 1
 
 let resolve_timeout = Duration.of_sec 1
 
+(* all input has been verified that ips and ports are non-empty. *)
 let expand_list ips ports =
-  List.concat_map (fun ip -> List.map (fun p -> (ip, p)) ports) ips
+  match List.concat_map (fun ip -> List.map (fun p -> (ip, p)) ports) ips with
+  | hd :: tl -> hd, tl
+  | _ -> failwith "ips or ports are empty"
 
 let tick now host id conn =
   match
@@ -155,11 +158,8 @@ let tick now host id conn =
         let ips =
           List.map (fun ip -> Ipaddr.V4 ip) (Ipv4_set.elements ips)
         in
-        begin match expand_list ips conn.ports with
-          | dst :: dsts ->
-            Ok (Connecting (now, dst, dsts), [ Connect (host, id, dst) ])
-          | _ -> Error ()
-        end
+        let dst, dsts = expand_list ips conn.ports in
+        Ok (Connecting (now, dst, dsts), [ Connect (host, id, dst) ])
       else
         Ok (Waiting_for_aaaa (started, ips), [])
     | Connecting (started, dst, dsts) ->
@@ -205,7 +205,7 @@ let merge ?(ipv4 = Ipv4_set.empty) ?(ipv6 = Ipv6_set.empty) ips =
       | Ipaddr.V6 ip -> ipv4, Ipv6_set.add ip ipv6)
     (ipv4, ipv6) ips
 
-let shuffle first v4 v6 =
+let shuffle ?first v4 v6 =
   match List.length v4, List.length v6 with
   | 0, _ -> v6
   | _, 0 -> v4
@@ -217,8 +217,8 @@ let shuffle first v4 v6 =
         | _, [] -> shuffle a v6 n
         | hd :: tl, hd' :: tl' ->
           match first with
-          | `V4 -> hd :: hd' :: shuffle tl tl' (pred n)
-          | `V6 -> hd' :: hd :: shuffle tl tl' (pred n)
+          | Some Ipaddr.V6 _ -> hd :: hd' :: shuffle tl tl' (pred n)
+          | None | Some Ipaddr.V4 _ -> hd' :: hd :: shuffle tl tl' (pred n)
     in
     shuffle v4 v6 (max v4l v6l)
 
@@ -229,13 +229,9 @@ let mix ?first ?ipv4 ?ipv6 ips =
     Ipv4_set.fold (fun ip acc -> Ipaddr.V4 ip :: acc) ipv4 [],
     Ipv6_set.fold (fun ip acc -> Ipaddr.V6 ip :: acc) ipv6 []
   in
-  let first =
-    match first with Some Ipaddr.V4 _ | None -> `V6 | Some Ipaddr.V6 _ -> `V4
-  in
-  shuffle first v4 v6
+  shuffle ?first v4 v6
 
-let mix_dst_with_ips ?(ipv4 = Ipv4_set.empty) ?(ipv6 = Ipv6_set.empty)
-    ports dst dsts =
+let mix_dsts ?(ipv4 = Ipv4_set.empty) ?(ipv6 = Ipv6_set.empty) ports dst dsts =
   let v4_present, v6_present = merge (List.map fst (dst :: dsts)) in
   let ipv4 = Ipv4_set.diff ipv4 v4_present
   and ipv6 = Ipv6_set.diff ipv6 v6_present
@@ -246,22 +242,30 @@ let mix_dst_with_ips ?(ipv4 = Ipv4_set.empty) ?(ipv6 = Ipv6_set.empty)
         | Ipaddr.V6 _, _ as a -> ipv4, a :: ipv6)
       ([], []) dsts
   in
-  let fresh_v4, fresh_v6 =
-    expand_list (Ipv4_set.fold (fun ip acc -> Ipaddr.V4 ip :: acc) ipv4 []) ports,
-    expand_list (Ipv6_set.fold (fun ip acc -> Ipaddr.V6 ip :: acc) ipv6 []) ports
+  let v4s =
+    let hd, tl =
+      expand_list
+        (Ipv4_set.fold (fun ip acc -> Ipaddr.V4 ip :: acc) ipv4 [])
+        ports
+    in
+    hd :: tl
+  and v6s =
+    let hd, tl =
+      expand_list
+        (Ipv6_set.fold (fun ip acc -> Ipaddr.V6 ip :: acc) ipv6 [])
+        ports
+    in
+    hd :: tl
   in
-  let first = match fst dst with Ipaddr.V4 _ -> `V6 | Ipaddr.V6 _ -> `V4 in
-  shuffle first (List.rev v4_dsts @ fresh_v4) (List.rev v6_dsts @ fresh_v6)
+  shuffle ~first:(fst dst) (List.rev v4_dsts @ v4s) (List.rev v6_dsts @ v6s)
 
 let connect_ip t now ~id ips ports =
-  match expand_list (mix (Ip_set.elements ips)) ports with
-  | dst :: dsts ->
-    let state = Connecting (now, dst, dsts) in
-    let conn = { created = now ; ports ; state ; resolved = `both } in
-    let host = Ipaddr.to_domain_name (fst dst) in
-    { t with conns = add_conn host id conn t.conns },
-    [ Connect (host, id, dst) ]
-  | _ -> failwith "empty ips or empty ports not supported"
+  let dst, dsts = expand_list (mix (Ip_set.elements ips)) ports in
+  let state = Connecting (now, dst, dsts) in
+  let conn = { created = now ; ports ; state ; resolved = `both } in
+  let host = Ipaddr.to_domain_name (fst dst) in
+  { t with conns = add_conn host id conn t.conns },
+  [ Connect (host, id, dst) ]
 
 let event t now e =
   Log.debug (fun m -> m "received event %a" pp_event e);
@@ -282,11 +286,8 @@ let event t now e =
                   let ips =
                     List.map (fun ip -> Ipaddr.V4 ip) (Ipv4_set.elements ips)
                   in
-                  begin match expand_list ips c.ports with
-                    | dst :: dsts ->
-                      Connecting (now, dst, dsts), Connect (name, id, dst) :: actions
-                    | _ -> failwith "empty ips"
-                  end
+                  let dst, dsts = expand_list ips c.ports in
+                  Connecting (now, dst, dsts), Connect (name, id, dst) :: actions
                 else
                   Waiting_for_aaaa (now, ips), actions
               | Waiting_for_aaaa (ts, ips') ->
@@ -295,7 +296,7 @@ let event t now e =
                               (Ipv4_set.elements ips'));
                 Waiting_for_aaaa (ts, Ipv4_set.union ips' ips), actions
               | Connecting (ts, dst, dsts) ->
-                let dsts = mix_dst_with_ips ~ipv4:ips c.ports dst dsts in
+                let dsts = mix_dsts ~ipv4:ips c.ports dst dsts in
                 Connecting (ts, dst, dsts), actions
             in
             IM.add id { c with state ; resolved } cs, actions)
@@ -339,20 +340,14 @@ let event t now e =
             let state, actions' = match c.state with
               | Resolving ->
                 let ips = mix ~ipv6:ips [] in
-                begin match expand_list ips c.ports with
-                  | dst :: dsts ->
-                    Connecting (now, dst, dsts), [ Connect (name, id, dst) ]
-                  | _ -> failwith "invalid input"
-                end
+                let dst, dsts = expand_list ips c.ports in
+                Connecting (now, dst, dsts), [ Connect (name, id, dst) ]
               | Waiting_for_aaaa (_ts, ips') ->
                 let ips = mix ~ipv4:ips' ~ipv6:ips [] in
-                begin match expand_list ips c.ports with
-                  | dst :: dsts ->
-                    Connecting (now, dst, dsts), [ Connect (name, id, dst) ]
-                  | _ -> failwith "invalid input"
-                end
+                let dst, dsts = expand_list ips c.ports in
+                Connecting (now, dst, dsts), [ Connect (name, id, dst) ]
               | Connecting (ts, dst, dsts) ->
-                let dsts = mix_dst_with_ips ~ipv6:ips c.ports dst dsts in
+                let dsts = mix_dsts ~ipv6:ips c.ports dst dsts in
                 Connecting (ts, dst, dsts), []
             in
             IM.add id { c with state ; resolved } cs, actions @ actions')
@@ -378,13 +373,10 @@ let event t now e =
               let ips =
                 List.map (fun ip -> Ipaddr.V4 ip) (Ipv4_set.elements ips)
               in
-              begin match expand_list ips c.ports with
-                | dst :: dsts ->
-                  let state = Connecting (now, dst, dsts) in
-                  IM.add id { c with state ; resolved } cs,
-                  Connect (name, id, dst) :: actions
-                | _ -> failwith "invalid input"
-              end
+              let dst, dsts = expand_list ips c.ports in
+              let state = Connecting (now, dst, dsts) in
+              IM.add id { c with state ; resolved } cs,
+              Connect (name, id, dst) :: actions
             | state -> IM.add id { c with state ; resolved } cs, actions)
             cs (IM.empty, [])
         in
