@@ -1,8 +1,12 @@
 
-(* TODO
-- rethink where & when to start tasks
-- cancellation of connection attempts
+(* Lwt tasks are spawned:
+ - create starts an asynchronous timer task
+ - the actions resulting from timer are scheduled in one separate task
+ - the actions returned from Happy_eyeballs.connect/event are scheduled in
+   respective separate tasks
 *)
+
+(* TODO - cancellation of connection attempts *)
 
 let src = Logs.Src.create "happy-eyeballs.mirage" ~doc:"Happy Eyeballs Mirage"
 module Log = (val Logs.src_log src : Logs.LOG)
