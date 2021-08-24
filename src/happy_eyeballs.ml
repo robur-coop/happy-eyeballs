@@ -256,8 +256,10 @@ let mix_dst_with_ips
   let first = match fst dst with Ipaddr.V4 _ -> `V6 | Ipaddr.V6 _ -> `V4 in
   shuffle first (List.rev v4_dsts @ fresh_v4) (List.rev v6_dsts @ fresh_v6)
 
+module Ip_set = Set.Make(Ipaddr)
+
 let connect_ip t now ~id ips ports =
-  match expand_list (mix ips) ports with
+  match expand_list (mix (Ip_set.elements ips)) ports with
   | dst :: dsts ->
     let state = Connecting (now, dst, dsts) in
     let conn = { created = now ; ports ; state ; resolved = `both } in

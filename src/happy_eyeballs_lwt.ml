@@ -124,28 +124,43 @@ let create () =
 let handle_actions t actions =
   List.iter (fun a -> Lwt.async (fun () -> act t a)) actions
 
-let connect t host ports =
-  let open Lwt_result.Infix in
-  Lwt_result.lift
-    (let open Rresult.R.Infix in
-     match Ipaddr.of_string host with
-     | Ok ip -> Ok (`Ip ip)
-     | Error _ ->
-       Domain_name.of_string host >>= fun dn ->
-       Domain_name.host dn >>| fun host ->
-       `Host host) >>= fun r ->
+let connect_host t host ports =
   let waiter, notify = Lwt.task () in
   let id = register_waiter t notify in
   let ts = now () in
-  let he, actions = match r with
-    | `Ip ip -> Happy_eyeballs.connect_ip t.he ts ~id [ip] ports
-    | `Host host -> Happy_eyeballs.connect t.he ts ~id host ports
-  in
+  let he, actions = Happy_eyeballs.connect t.he ts ~id host ports in
   t.he <- he;
   handle_actions t actions;
   let open Lwt.Infix in
   waiter >|= fun r ->
-  Logs.debug (fun m -> m "connection %s to %s after %a"
+  Logs.debug (fun m -> m "connection %s to %a after %a"
                  (match r with Ok _ -> "ok" | Error _ -> "failed")
-                 host Duration.pp (Int64.sub (now ()) ts));
+                 Domain_name.pp host Duration.pp (Int64.sub (now ()) ts));
   r
+
+let connect_ip t ips ports =
+  let waiter, notify = Lwt.task () in
+  let id = register_waiter t notify in
+  let ts = now () in
+  let he, actions = Happy_eyeballs.connect_ip t.he ts ~id ips ports in
+  t.he <- he;
+  handle_actions t actions;
+  let open Lwt.Infix in
+  waiter >|= fun r ->
+  Logs.debug (fun m -> m "connection %s to %a after %a"
+                 (match r with Ok _ -> "ok" | Error _ -> "failed")
+                 Fmt.(list ~sep:(unit ", ") Ipaddr.pp)
+                 (Happy_eyeballs.Ip_set.elements ips)
+                 Duration.pp (Int64.sub (now ()) ts));
+  r
+
+let connect t host ports =
+  match Ipaddr.of_string host with
+  | Ok ip -> connect_ip t (Happy_eyeballs.Ip_set.singleton ip) ports
+  | Error _ ->
+    let open Lwt_result.Infix in
+    Lwt_result.lift
+      (let open Rresult.R.Infix in
+       Domain_name.of_string host >>= fun dn ->
+       Domain_name.host dn) >>= fun host ->
+    connect_host t host ports

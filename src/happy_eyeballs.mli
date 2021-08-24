@@ -39,7 +39,9 @@ val connect : t -> int64 -> id:int -> [`host] Domain_name.t -> int list ->
     [ports] are attempted in sequence. It results in an updated [t] and a list
     of actions to be performed. *)
 
-val connect_ip : t -> int64 -> id:int -> Ipaddr.t list -> int list ->
+module Ip_set : Set.S with type elt = Ipaddr.t
+
+val connect_ip : t -> int64 -> id:int -> Ip_set.t -> int list ->
   t * action list
 (** [connect_ip t ts ~id ips ports] attempts a connection to [ips, ports]. The
     list of ips will be sorted (mixing IPv6 and IPv4 addresses). The ports will
