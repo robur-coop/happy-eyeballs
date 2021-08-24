@@ -63,3 +63,15 @@ val event : t -> int64 -> event -> t * action list
     performed.
 
     @raise Failure if [ev] contains an empty set of IP addresses. *)
+
+(** A map for waiters and internal id. *)
+module Waiter_map : sig
+  include Map.S with type key = Int.t
+
+  val register : 'a -> 'a t -> 'a t * int
+  (** [register v t] registers [v] in [t], and returns the updated map and
+      the key that was used. *)
+
+  val find_and_remove : int -> 'a t -> 'a t * 'a option
+  (** [find_and_remove id t] looks up [id] in [t], and removes [id] from [t]. *)
+end

@@ -1,0 +1,14 @@
+module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) (P : Mirage_clock.PCLOCK) (S : Mirage_stack.V4V6) : sig
+  type t
+
+  val create : S.t -> t
+
+  val connect_host : t -> [`host] Domain_name.t -> int list ->
+    ((Ipaddr.t * int) * S.TCP.flow, [ `Msg of string ]) result Lwt.t
+
+  val connect_ip : t -> Happy_eyeballs.Ip_set.t -> int list ->
+    ((Ipaddr.t * int) * S.TCP.flow, [ `Msg of string ]) result Lwt.t
+
+  val connect : t -> string -> int list ->
+    ((Ipaddr.t * int) * S.TCP.flow, [ `Msg of string ]) result Lwt.t
+end

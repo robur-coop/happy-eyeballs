@@ -424,3 +424,20 @@ let event t now e =
         t.conns
     in
     { t with conns }, []
+
+module Waiter_map = struct
+  include Map.Make(Int)
+
+  let _id = ref 0
+
+  let register v t =
+    incr _id;
+    let id = !_id in
+    add id v t, id
+
+  let find_and_remove id t =
+    match find_opt id t with
+    | None -> t, None
+    | Some x -> remove id t, Some x
+
+end

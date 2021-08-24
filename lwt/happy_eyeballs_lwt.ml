@@ -4,25 +4,18 @@
 - cancellation of connection attempts
 *)
 
+let src = Logs.Src.create "happy-eyeballs.lwt" ~doc:"Happy Eyeballs Lwt"
+module Log = (val Logs.src_log src : Logs.LOG)
+
 let he_timer = Duration.of_ms 10
 
 let now = Mtime_clock.elapsed_ns
 
-module IM = Map.Make(Int)
-
 type t = {
-  mutable waiters : ((Ipaddr.t * int) * Lwt_unix.file_descr, [ `Msg of string ]) result Lwt.u IM.t ;
+  mutable waiters : ((Ipaddr.t * int) * Lwt_unix.file_descr, [ `Msg of string ]) result Lwt.u Happy_eyeballs.Waiter_map.t ;
   mutable he : Happy_eyeballs.t ;
   dns : Dns_client_lwt.t ;
 }
-
-let _id = ref 0
-
-let register_waiter t w =
-  incr _id;
-  let id = !_id in
-  t.waiters <- IM.add id w t.waiters;
-  id
 
 let safe_close fd =
   if Lwt_unix.state fd = Lwt_unix.Closed then
@@ -50,7 +43,7 @@ let try_connect ip port =
 
 let rec act t action =
   let open Lwt.Infix in
-  Logs.debug (fun m -> m "action %a" Happy_eyeballs.pp_action action);
+  Log.debug (fun m -> m "action %a" Happy_eyeballs.pp_action action);
   begin
     match action with
     | Happy_eyeballs.Resolve_a host ->
@@ -79,9 +72,10 @@ let rec act t action =
       begin
         try_connect ip port >>= function
         | Ok fd ->
-          begin match IM.find_opt id t.waiters with
+          let waiters, r = Happy_eyeballs.Waiter_map.find_and_remove id t.waiters in
+          t.waiters <- waiters;
+          begin match r with
             | Some waiter ->
-              t.waiters <- IM.remove id t.waiters;
               Lwt.wakeup_later waiter (Ok ((ip, port), fd));
               Lwt.return (Ok (Happy_eyeballs.Connected (host, id, (ip, port))))
             | None ->
@@ -93,9 +87,10 @@ let rec act t action =
           Lwt.return (Ok (Happy_eyeballs.Connection_failed (host, id, (ip, port))))
       end
     | Happy_eyeballs.Connect_failed (_host, id) ->
-      begin match IM.find_opt id t.waiters with
+      let waiters, r = Happy_eyeballs.Waiter_map.find_and_remove id t.waiters in
+      t.waiters <- waiters;
+      begin match r with
         | Some waiter ->
-          t.waiters <- IM.remove id t.waiters;
           Lwt.wakeup_later waiter (Error (`Msg "connection failed"));
           Lwt.return (Error ())
         | None ->
@@ -123,7 +118,7 @@ let rec timer t =
   timer t
 
 let create () =
-  let waiters = IM.empty
+  let waiters = Happy_eyeballs.Waiter_map.empty
   and he = Happy_eyeballs.create (now ())
   and dns = Dns_client_lwt.create ()
   in
@@ -136,32 +131,34 @@ let handle_actions t actions =
 
 let connect_host t host ports =
   let waiter, notify = Lwt.task () in
-  let id = register_waiter t notify in
+  let waiters, id = Happy_eyeballs.Waiter_map.register notify t.waiters in
+  t.waiters <- waiters;
   let ts = now () in
   let he, actions = Happy_eyeballs.connect t.he ts ~id host ports in
   t.he <- he;
   handle_actions t actions;
   let open Lwt.Infix in
   waiter >|= fun r ->
-  Logs.debug (fun m -> m "connection %s to %a after %a"
-                 (match r with Ok _ -> "ok" | Error _ -> "failed")
-                 Domain_name.pp host Duration.pp (Int64.sub (now ()) ts));
+  Log.debug (fun m -> m "connection %s to %a after %a"
+                (match r with Ok _ -> "ok" | Error _ -> "failed")
+                Domain_name.pp host Duration.pp (Int64.sub (now ()) ts));
   r
 
 let connect_ip t ips ports =
   let waiter, notify = Lwt.task () in
-  let id = register_waiter t notify in
+  let waiters, id = Happy_eyeballs.Waiter_map.register notify t.waiters in
+  t.waiters <- waiters;
   let ts = now () in
   let he, actions = Happy_eyeballs.connect_ip t.he ts ~id ips ports in
   t.he <- he;
   handle_actions t actions;
   let open Lwt.Infix in
   waiter >|= fun r ->
-  Logs.debug (fun m -> m "connection %s to %a after %a"
-                 (match r with Ok _ -> "ok" | Error _ -> "failed")
-                 Fmt.(list ~sep:(unit ", ") Ipaddr.pp)
-                 (Happy_eyeballs.Ip_set.elements ips)
-                 Duration.pp (Int64.sub (now ()) ts));
+  Log.debug (fun m -> m "connection %s to %a after %a"
+                (match r with Ok _ -> "ok" | Error _ -> "failed")
+                Fmt.(list ~sep:(unit ", ") Ipaddr.pp)
+                (Happy_eyeballs.Ip_set.elements ips)
+                Duration.pp (Int64.sub (now ()) ts));
   r
 
 let connect t host ports =

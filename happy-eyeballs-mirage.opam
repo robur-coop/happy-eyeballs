@@ -10,7 +10,6 @@ depends: [
   "ocaml" {>= "4.08.0"}
   "dune" {>= "2.0.0"}
   "happy-eyeballs" {=version}
-  "cmdliner"
   "duration"
   "dns-client"
   "domain-name"
@@ -18,7 +17,10 @@ depends: [
   "fmt"
   "logs"
   "lwt"
-  "mtime"
+  "mirage-clock"
+  "mirage-stack"
+  "mirage-random"
+  "mirage-time"
   "rresult"
 ]
 build: [

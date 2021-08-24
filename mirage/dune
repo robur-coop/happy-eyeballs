@@ -1,0 +1,4 @@
+(library
+ (name happy_eyeballs_mirage)
+ (public_name happy-eyeballs-mirage)
+ (libraries logs rresult dns-client.mirage lwt happy-eyeballs))
