@@ -13,3 +13,4 @@ It is licensed under the ISC license.
 Installation:
 
 `opam pin add happy-eyeballs https://github.com/roburio/happy-eyeballs.git`
+`opam pin add happy-eyeballs-lwt https://github.com/roburio/happy-eyeballs.git`
