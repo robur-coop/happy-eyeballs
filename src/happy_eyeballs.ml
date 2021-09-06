@@ -43,6 +43,7 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
    *Connecting* --[Resolved_a/Resolved_a_failed/Resolved_aaaa/Resolved_aaaa_failed]--> Connecting
    *Connecting* (more options available) --[Connection_failed/connect_timeout]--> Connecting (next)
+   *Connecting* (resolved=`v6, no more options available) --[Connection_failed]--> Resolving
    *Connecting* (no more options available) --[Connection_failed/connect_timeout]--> FAIL
 
    *Connecting* --[Connected]--> SUCCESS!
