@@ -403,9 +403,14 @@ let event t now e =
           let is_dst (ip', port') = Ipaddr.compare ip ip' = 0 && port = port' in
           match c.state with
           | Connecting (_ts, dst, []) when is_dst dst ->
-            let cs = IM.remove id cs in
-            Domain_name.Host_map.add name cs t.conns,
-            [ Connect_failed (name, id) ]
+            if c.resolved = `both then
+              let cs = IM.remove id cs in
+              Domain_name.Host_map.add name cs t.conns,
+              [ Connect_failed (name, id) ]
+            else
+              let state = Resolving in
+              let cs = IM.add id { c with state } cs in
+              Domain_name.Host_map.add name cs t.conns, []
           | Connecting (_ts, dst, ndst :: dsts) when is_dst dst ->
             let state = Connecting (now, ndst, dsts) in
             let cs = IM.add id { c with state } cs in
