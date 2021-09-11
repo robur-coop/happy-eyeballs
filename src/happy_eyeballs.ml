@@ -1,9 +1,3 @@
-module Ip_set = Set.Make(Ipaddr)
-
-module Ipv4_set = Set.Make(Ipaddr.V4)
-
-module Ipv6_set = Set.Make(Ipaddr.V6)
-
 let src = Logs.Src.create "happy-eyeballs" ~doc:"Happy Eyeballs"
 module Log = (val Logs.src_log src : Logs.LOG)
 
@@ -52,7 +46,7 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 type conn_state =
   | Resolving
-  | Waiting_for_aaaa of int64 * Ipv4_set.t (* TODO ensure non-empty set *)
+  | Waiting_for_aaaa of int64 * Ipaddr.V4.Set.t (* TODO ensure non-empty set *)
   | Connecting of int64 * (Ipaddr.t * int) * (Ipaddr.t * int) list
 
 type connection = {
@@ -93,8 +87,8 @@ let pp_action ppf = function
 
 (* it likely makes sense to record resolving_failed events as well *)
 type event =
-  | Resolved_a of [`host] Domain_name.t * Ipv4_set.t
-  | Resolved_aaaa of [`host] Domain_name.t * Ipv6_set.t
+  | Resolved_a of [`host] Domain_name.t * Ipaddr.V4.Set.t
+  | Resolved_aaaa of [`host] Domain_name.t * Ipaddr.V6.Set.t
   | Resolved_a_failed of [`host] Domain_name.t
   | Resolved_aaaa_failed of [`host] Domain_name.t
   | Connection_failed of [`host] Domain_name.t * int * (Ipaddr.t * int)
@@ -104,11 +98,11 @@ let pp_event ppf = function
   | Resolved_a (host, ips) ->
     Fmt.pf ppf "resolved A %a: %a" Domain_name.pp host
       Fmt.(list ~sep:(unit ", ") Ipaddr.V4.pp)
-      (Ipv4_set.elements ips)
+      (Ipaddr.V4.Set.elements ips)
   | Resolved_aaaa (host, ips) ->
     Fmt.pf ppf "resolved AAAA %a: %a" Domain_name.pp host
       Fmt.(list ~sep:(unit ", ") Ipaddr.V6.pp)
-      (Ipv6_set.elements ips)
+      (Ipaddr.V6.Set.elements ips)
   | Resolved_a_failed host ->
     Fmt.pf ppf "resolve A failed for %a" Domain_name.pp host
   | Resolved_aaaa_failed host ->
@@ -160,7 +154,7 @@ let tick now host id conn =
                     (Int64.sub now started) aaaa_timeout);
       if Int64.sub now started > aaaa_timeout then
         let ips =
-          List.map (fun ip -> Ipaddr.V4 ip) (Ipv4_set.elements ips)
+          List.map (fun ip -> Ipaddr.V4 ip) (Ipaddr.V4.Set.elements ips)
         in
         let dst, dsts = expand_list_split ips conn.ports in
         Ok (Connecting (now, dst, dsts), [ Connect (host, id, dst) ])
@@ -203,10 +197,10 @@ let connect t now ~id host ports =
   { t with conns = add_conn host id conn t.conns },
   [ Resolve_aaaa host ; Resolve_a host ]
 
-let merge ?(ipv4 = Ipv4_set.empty) ?(ipv6 = Ipv6_set.empty) ips =
+let merge ?(ipv4 = Ipaddr.V4.Set.empty) ?(ipv6 = Ipaddr.V6.Set.empty) ips =
   List.fold_left (fun (ipv4, ipv6) -> function
-      | Ipaddr.V4 ip -> Ipv4_set.add ip ipv4, ipv6
-      | Ipaddr.V6 ip -> ipv4, Ipv6_set.add ip ipv6)
+      | Ipaddr.V4 ip -> Ipaddr.V4.Set.add ip ipv4, ipv6
+      | Ipaddr.V6 ip -> ipv4, Ipaddr.V6.Set.add ip ipv6)
     (ipv4, ipv6) ips
 
 let shuffle ?first v4 v6 =
@@ -230,15 +224,15 @@ let shuffle ?first v4 v6 =
 let mix ?first ?ipv4 ?ipv6 ips =
   let ipv4, ipv6 = merge ?ipv4 ?ipv6 ips in
   let v4, v6 =
-    Ipv4_set.fold (fun ip acc -> Ipaddr.V4 ip :: acc) ipv4 [],
-    Ipv6_set.fold (fun ip acc -> Ipaddr.V6 ip :: acc) ipv6 []
+    Ipaddr.V4.Set.fold (fun ip acc -> Ipaddr.V4 ip :: acc) ipv4 [],
+    Ipaddr.V6.Set.fold (fun ip acc -> Ipaddr.V6 ip :: acc) ipv6 []
   in
   shuffle ?first v4 v6
 
-let mix_dsts ?(ipv4 = Ipv4_set.empty) ?(ipv6 = Ipv6_set.empty) ports dst dsts =
+let mix_dsts ?(ipv4 = Ipaddr.V4.Set.empty) ?(ipv6 = Ipaddr.V6.Set.empty) ports dst dsts =
   let v4_present, v6_present = merge (List.map fst (dst :: dsts)) in
-  let ipv4 = Ipv4_set.diff ipv4 v4_present
-  and ipv6 = Ipv6_set.diff ipv6 v6_present
+  let ipv4 = Ipaddr.V4.Set.diff ipv4 v4_present
+  and ipv6 = Ipaddr.V6.Set.diff ipv6 v6_present
   in
   let v4_dsts, v6_dsts =
     List.fold_left (fun (ipv4, ipv6) -> function
@@ -248,17 +242,17 @@ let mix_dsts ?(ipv4 = Ipv4_set.empty) ?(ipv6 = Ipv6_set.empty) ports dst dsts =
   in
   let v4s =
     expand_list
-      (Ipv4_set.fold (fun ip acc -> Ipaddr.V4 ip :: acc) ipv4 [])
+      (Ipaddr.V4.Set.fold (fun ip acc -> Ipaddr.V4 ip :: acc) ipv4 [])
       ports
   and v6s =
     expand_list
-      (Ipv6_set.fold (fun ip acc -> Ipaddr.V6 ip :: acc) ipv6 [])
+      (Ipaddr.V6.Set.fold (fun ip acc -> Ipaddr.V6 ip :: acc) ipv6 [])
       ports
   in
   shuffle ~first:(fst dst) (List.rev v4_dsts @ v4s) (List.rev v6_dsts @ v6s)
 
 let connect_ip t now ~id ips ports =
-  let dst, dsts = expand_list_split (mix (Ip_set.elements ips)) ports in
+  let dst, dsts = expand_list_split (mix (Ipaddr.Set.elements ips)) ports in
   let state = Connecting (now, dst, dsts) in
   let conn = { created = now ; ports ; state ; resolved = `both } in
   let host = Ipaddr.to_domain_name (fst dst) in
@@ -282,7 +276,7 @@ let event t now e =
               | Resolving ->
                 if resolved = `both then
                   let ips =
-                    List.map (fun ip -> Ipaddr.V4 ip) (Ipv4_set.elements ips)
+                    List.map (fun ip -> Ipaddr.V4 ip) (Ipaddr.V4.Set.elements ips)
                   in
                   let dst, dsts = expand_list_split ips c.ports in
                   Connecting (now, dst, dsts), Connect (name, id, dst) :: actions
@@ -291,8 +285,8 @@ let event t now e =
               | Waiting_for_aaaa (ts, ips') ->
                 Logs.warn (fun m -> m "already waiting for AAAA with %a"
                               Fmt.(list ~sep:(unit ", ") Ipaddr.V4.pp)
-                              (Ipv4_set.elements ips'));
-                Waiting_for_aaaa (ts, Ipv4_set.union ips' ips), actions
+                              (Ipaddr.V4.Set.elements ips'));
+                Waiting_for_aaaa (ts, Ipaddr.V4.Set.union ips' ips), actions
               | Connecting (ts, dst, dsts) ->
                 let dsts = mix_dsts ~ipv4:ips c.ports dst dsts in
                 Connecting (ts, dst, dsts), actions
@@ -369,7 +363,7 @@ let event t now e =
               cs, Connect_failed (name, id) :: actions
             | Waiting_for_aaaa (_ts, ips) ->
               let ips =
-                List.map (fun ip -> Ipaddr.V4 ip) (Ipv4_set.elements ips)
+                List.map (fun ip -> Ipaddr.V4 ip) (Ipaddr.V4.Set.elements ips)
               in
               let dst, dsts = expand_list_split ips c.ports in
               let state = Connecting (now, dst, dsts) in

@@ -11,7 +11,7 @@ val connect_host : t -> [`host] Domain_name.t -> int list ->
 
     @raise Failure if [ports] is empty. *)
 
-val connect_ip : t -> Happy_eyeballs.Ip_set.t -> int list ->
+val connect_ip : t -> Ipaddr.Set.t -> int list ->
   ((Ipaddr.t * int) * Lwt_unix.file_descr, [ `Msg of string ]) result Lwt.t
 (** [connect_ip t ips ports] establishes a connection to [ips] on [ports].
 

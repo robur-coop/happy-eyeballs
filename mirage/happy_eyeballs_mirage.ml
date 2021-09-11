@@ -39,8 +39,8 @@ module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) 
           DNS.getaddrinfo t.dns Dns.Rr_map.A host >|= function
           | Ok (_, res) ->
             let r =
-              Dns.Rr_map.Ipv4_set.fold Happy_eyeballs.Ipv4_set.add
-                res Happy_eyeballs.Ipv4_set.empty
+              Dns.Rr_map.Ipv4_set.fold Ipaddr.V4.Set.add
+                res Ipaddr.V4.Set.empty
             in
             Ok (Happy_eyeballs.Resolved_a (host, r))
           | Error _ -> Ok (Happy_eyeballs.Resolved_a_failed host)
@@ -50,8 +50,8 @@ module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) 
           DNS.getaddrinfo t.dns Dns.Rr_map.Aaaa host >|= function
           | Ok (_, res) ->
             let r =
-              Dns.Rr_map.Ipv6_set.fold Happy_eyeballs.Ipv6_set.add
-                res Happy_eyeballs.Ipv6_set.empty
+              Dns.Rr_map.Ipv6_set.fold Ipaddr.V6.Set.add
+                res Ipaddr.V6.Set.empty
             in
             Ok (Happy_eyeballs.Resolved_aaaa (host, r))
           | Error _ -> Ok (Happy_eyeballs.Resolved_aaaa_failed host)
@@ -145,13 +145,13 @@ module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) 
     Log.debug (fun m -> m "connection %s to %a after %a"
                   (match r with Ok _ -> "ok" | Error _ -> "failed")
                   Fmt.(list ~sep:(unit ", ") Ipaddr.pp)
-                  (Happy_eyeballs.Ip_set.elements ips)
+                  (Ipaddr.Set.elements ips)
                   Duration.pp (Int64.sub (C.elapsed_ns ()) ts));
     r
 
   let connect t host ports =
     match Ipaddr.of_string host with
-    | Ok ip -> connect_ip t (Happy_eyeballs.Ip_set.singleton ip) ports
+    | Ok ip -> connect_ip t (Ipaddr.Set.singleton ip) ports
     | Error _ ->
       let open Lwt_result.Infix in
       Lwt_result.lift
