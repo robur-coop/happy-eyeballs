@@ -132,26 +132,25 @@ module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) 
                   Duration.pp (Int64.sub (C.elapsed_ns ()) ts));
     r
 
-  let connect_ip t ips ports =
+  let connect_ip ?shuffle t ips ports =
     let waiter, notify = Lwt.task () in
     let waiters, id = Happy_eyeballs.Waiter_map.register notify t.waiters in
     t.waiters <- waiters;
     let ts = C.elapsed_ns () in
-    let he, actions = Happy_eyeballs.connect_ip t.he ts ~id ips ports in
+    let he, actions = Happy_eyeballs.connect_ip ?shuffle t.he ts ~id ips ports in
     t.he <- he;
     handle_actions t actions;
     let open Lwt.Infix in
     waiter >|= fun r ->
     Log.debug (fun m -> m "connection %s to %a after %a"
                   (match r with Ok _ -> "ok" | Error _ -> "failed")
-                  Fmt.(list ~sep:(unit ", ") Ipaddr.pp)
-                  (Ipaddr.Set.elements ips)
+                  Fmt.(list ~sep:(unit ", ") Ipaddr.pp) ips
                   Duration.pp (Int64.sub (C.elapsed_ns ()) ts));
     r
 
   let connect t host ports =
     match Ipaddr.of_string host with
-    | Ok ip -> connect_ip t (Ipaddr.Set.singleton ip) ports
+    | Ok ip -> connect_ip t [ip] ports
     | Error _ ->
       let open Lwt_result.Infix in
       Lwt_result.lift

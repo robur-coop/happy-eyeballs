@@ -251,8 +251,8 @@ let mix_dsts ?(ipv4 = Ipaddr.V4.Set.empty) ?(ipv6 = Ipaddr.V6.Set.empty) ports d
   in
   shuffle ~first:(fst dst) (List.rev v4_dsts @ v4s) (List.rev v6_dsts @ v6s)
 
-let connect_ip t now ~id ips ports =
-  let dst, dsts = expand_list_split (mix (Ipaddr.Set.elements ips)) ports in
+let connect_ip ?(shuffle = false) t now ~id ips ports =
+  let dst, dsts = expand_list_split (if shuffle then mix ips else ips) ports in
   let state = Connecting (now, dst, dsts) in
   let conn = { created = now ; ports ; state ; resolved = `both } in
   let host = Ipaddr.to_domain_name (fst dst) in

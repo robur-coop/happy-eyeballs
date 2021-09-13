@@ -11,11 +11,13 @@ val connect_host : t -> [`host] Domain_name.t -> int list ->
 
     @raise Failure if [ports] is empty. *)
 
-val connect_ip : t -> Ipaddr.Set.t -> int list ->
+val connect_ip : ?shuffle:bool -> t -> Ipaddr.t list -> int list ->
   ((Ipaddr.t * int) * Lwt_unix.file_descr, [ `Msg of string ]) result Lwt.t
-(** [connect_ip t ips ports] establishes a connection to [ips] on [ports].
+(** [connect_ip ~shuffle t ips ports] establishes a connection to [ips] on
+    [ports]. If [shuffle] is provided and true (default: falsE), the list of
+    ips will be mixed before connection attempts.
 
-    @raise Failure if [ips] is the empty set, or [ports] is the empty list. *)
+    @raise Failure if [ips] is the empty list, or [ports] is the empty list. *)
 
 val connect : t -> string -> int list ->
   ((Ipaddr.t * int) * Lwt_unix.file_descr, [ `Msg of string ]) result Lwt.t

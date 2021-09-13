@@ -40,14 +40,15 @@ val connect : t -> int64 -> id:int -> [`host] Domain_name.t -> int list ->
 
     @raise Failure if [ports] is the empty list. *)
 
-val connect_ip : t -> int64 -> id:int -> Ipaddr.Set.t -> int list ->
-  t * action list
-(** [connect_ip t ts ~id ips ports] attempts a connection to [ips, ports]. The
-    list of ips will be sorted (mixing IPv6 and IPv4 addresses). The ports will
-    be tried in sequence. The result is an updated [t] and a list of actions to
-    be performed.
+val connect_ip : ?shuffle:bool -> t -> int64 -> id:int -> Ipaddr.t list ->
+  int list -> t * action list
+(** [connect_ip ~shuffle t ts ~id ips ports] attempts a connection to
+    [ips, ports]. If [shuffle] is provided and true (default: false), the list
+    of ips will be mixed before attempting connections. By default, the list
+    will be tried in sequence. The ports will be tried in sequence.
+    The result is an updated [t] and a list of actions to be performed.
 
-    @raise Failure if [ports] is the empty list or [ips] the empty set. *)
+    @raise Failure if [ports] is the empty list or [ips] the empty list. *)
 
 val event : t -> int64 -> event -> t * action list
 (** [event t ts ev] results in an updated [t] and a list of actions to be

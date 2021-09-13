@@ -1,3 +1,9 @@
+## v0.0.5 (2021-09-13)
+
+* connect_ip: take an optional shuffle argument and an ordered list of ips to
+  attempt connections to. The reason for this change is that /etc/resolv.conf
+  specifies an ordering.
+
 ## v0.0.4 (2021-09-11)
 
 * Use set from ipaddr (>= 5.2.0) instead providing these
