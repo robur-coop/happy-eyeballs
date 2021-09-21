@@ -249,7 +249,7 @@ let connect_ip t now ~id dsts =
   in
   let state = Connecting (now, dst, dsts) in
   let conn = { created = now ; ports = [] ; state ; resolved = `both } in
-  let host = Ipaddr.to_domain_name (fst dst) in
+  let host = Domain_name.(host_exn (of_string_exn "host.invalid")) in
   { t with conns = add_conn host id conn t.conns },
   [ Connect (host, id, dst) ]
 
