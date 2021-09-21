@@ -6,7 +6,7 @@ module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) 
   val connect_host : t -> [`host] Domain_name.t -> int list ->
     ((Ipaddr.t * int) * S.TCP.flow, [ `Msg of string ]) result Lwt.t
 
-  val connect_ip : ?shuffle:bool -> t -> Ipaddr.t list -> int list ->
+  val connect_ip : t -> (Ipaddr.t * int) list ->
     ((Ipaddr.t * int) * S.TCP.flow, [ `Msg of string ]) result Lwt.t
 
   val connect : t -> string -> int list ->
