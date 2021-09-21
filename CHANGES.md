@@ -1,3 +1,8 @@
+## v0.0.6 (2021-09-21)
+
+* connect_ip: take list of Ipaddr.t and int pairs instead of separate lists.
+  The reason for this change is the dns-client.
+
 ## v0.0.5 (2021-09-13)
 
 * connect_ip: take an optional shuffle argument and an ordered list of ips to
