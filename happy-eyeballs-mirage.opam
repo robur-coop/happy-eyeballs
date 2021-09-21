@@ -4,6 +4,7 @@ authors: ["Robur <team@robur.coop>"]
 homepage: "https://github.com/roburio/happy-eyeballs"
 dev-repo: "git+https://github.com/roburio/happy-eyeballs.git"
 bug-reports: "https://github.com/roburio/happy-eyeballs/issues"
+doc: "https://roburio.github.io/happy-eyeballs/"
 license: "ISC"
 
 depends: [
