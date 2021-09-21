@@ -27,7 +27,7 @@ val create : int64 -> t
 (** [create ts] creates the internal state, initialized with the timestamp
     [ts] (an arbitrary number that must be monotonically increasing). *)
 
-val timer : t -> int64 -> t * action list
+val timer : t -> int64 -> t * [ `Suspend | `Act of action list ]
 (** [timer t ts] is a timer function that results in an updated [t] and a list
     of actions that need to be performed (connection to be retried, connection
     failures to be repored, ...) *)

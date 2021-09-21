@@ -176,7 +176,11 @@ let timer t now =
         t, actions) t.conns (Domain_name.Host_map.empty, [])
   in
   Log.debug (fun m -> m "timer %d actions" (List.length actions));
-  { t with conns }, actions
+  { t with conns },
+  if Domain_name.Host_map.is_empty conns then
+    (assert (actions = []); `Suspend)
+  else
+    `Act actions
 
 let connect t now ~id host ports =
   if ports = [] then failwith "empty port list not supported";

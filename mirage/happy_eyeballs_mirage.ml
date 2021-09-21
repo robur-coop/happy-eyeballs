@@ -19,6 +19,7 @@ module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) 
     stack : S.t ;
     mutable waiters : ((Ipaddr.t * int) * S.TCP.flow, [ `Msg of string ]) result Lwt.u Happy_eyeballs.Waiter_map.t ;
     mutable he : Happy_eyeballs.t ;
+    timer_condition : unit Lwt_condition.t ;
   }
 
   let he_timer = Duration.of_ms 10
@@ -97,19 +98,26 @@ module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) 
 
   let rec timer t =
     let open Lwt.Infix in
-    Lwt.join [
+    let rec loop () =
       let he, actions = Happy_eyeballs.timer t.he (C.elapsed_ns ()) in
       t.he <- he ;
-      handle_timer_actions t actions ;
-      T.sleep_ns he_timer
-    ] >>= fun () ->
-    timer t
+      match actions with
+      | `Suspend ->
+        timer t
+      | `Act actions ->
+        handle_timer_actions t actions ;
+        T.sleep_ns he_timer >>= fun () ->
+        loop ()
+    in
+    Lwt_condition.wait t.timer_condition >>= fun () ->
+    loop ()
 
   let create stack =
     let dns = DNS.create stack
     and he = Happy_eyeballs.create (C.elapsed_ns ())
+    and timer_condition = Lwt_condition.create ()
     in
-    let t = { dns ; stack ; waiters = Happy_eyeballs.Waiter_map.empty ; he } in
+    let t = { dns ; stack ; waiters = Happy_eyeballs.Waiter_map.empty ; he ; timer_condition } in
     Lwt.async (fun () -> timer t);
     t
 
@@ -123,6 +131,7 @@ module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) 
     let ts = C.elapsed_ns () in
     let he, actions = Happy_eyeballs.connect t.he ts ~id host ports in
     t.he <- he;
+    Lwt_condition.signal t.timer_condition ();
     handle_actions t actions;
     let open Lwt.Infix in
     waiter >|= fun r ->
@@ -139,6 +148,7 @@ module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) 
     let ts = C.elapsed_ns () in
     let he, actions = Happy_eyeballs.connect_ip t.he ts ~id addresses in
     t.he <- he;
+    Lwt_condition.signal t.timer_condition ();
     handle_actions t actions;
     let open Lwt.Infix in
     waiter >|= fun r ->

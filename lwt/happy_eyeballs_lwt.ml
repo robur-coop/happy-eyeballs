@@ -19,6 +19,7 @@ type t = {
   mutable waiters : ((Ipaddr.t * int) * Lwt_unix.file_descr, [ `Msg of string ]) result Lwt.u Happy_eyeballs.Waiter_map.t ;
   mutable he : Happy_eyeballs.t ;
   dns : Dns_client_lwt.t ;
+  timer_condition : unit Lwt_condition.t ;
 }
 
 let safe_close fd =
@@ -113,20 +114,27 @@ let handle_timer_actions t actions =
 
 let rec timer t =
   let open Lwt.Infix in
-  Lwt.join [
+  let rec loop () =
     let he, actions = Happy_eyeballs.timer t.he (now ()) in
     t.he <- he ;
-    handle_timer_actions t actions ;
-    Lwt_unix.sleep (Duration.to_f he_timer)
-  ] >>= fun () ->
-  timer t
+    match actions with
+    | `Suspend ->
+      timer t
+    | `Act actions ->
+      handle_timer_actions t actions ;
+      Lwt_unix.sleep (Duration.to_f he_timer) >>= fun () ->
+      loop ()
+  in
+  Lwt_condition.wait t.timer_condition >>= fun () ->
+  loop ()
 
 let create () =
   let waiters = Happy_eyeballs.Waiter_map.empty
   and he = Happy_eyeballs.create (now ())
   and dns = Dns_client_lwt.create ()
+  and timer_condition = Lwt_condition.create ()
   in
-  let t = { waiters ; he ; dns } in
+  let t = { waiters ; he ; dns ; timer_condition } in
   Lwt.async (fun () -> timer t);
   t
 
@@ -140,6 +148,7 @@ let connect_host t host ports =
   let ts = now () in
   let he, actions = Happy_eyeballs.connect t.he ts ~id host ports in
   t.he <- he;
+  Lwt_condition.signal t.timer_condition ();
   handle_actions t actions;
   let open Lwt.Infix in
   waiter >|= fun r ->
@@ -155,6 +164,7 @@ let connect_ip t addresses =
   let ts = now () in
   let he, actions = Happy_eyeballs.connect_ip t.he ts ~id addresses in
   t.he <- he;
+  Lwt_condition.signal t.timer_condition ();
   handle_actions t actions;
   let open Lwt.Infix in
   waiter >|= fun r ->
