@@ -150,7 +150,7 @@ let tick now host id conn =
       let ips = List.map (fun ip -> Ipaddr.V4 ip) (Ipaddr.V4.Set.elements ips) in
       let dst, dsts = expand_list_split ips conn.ports in
       Ok (Connecting (now, dst, dsts), [ Connect (host, id, dst) ])
-    | Connecting (started, dst, dsts) when Int64.sub now started > connect_timeout->
+    | Connecting (started, _dst, dsts) when Int64.sub now started > connect_timeout->
       (* TODO cancel previous connection attempt *)
       (match dsts with
        | [] -> Error ()
@@ -295,7 +295,7 @@ let event t now e =
             match c.state with
             | Resolving when resolved = `both ->
               cs, Connect_failed (name, id) :: actions
-            | state -> IM.add id { c with resolved } cs, actions)
+            | _ -> IM.add id { c with resolved } cs, actions)
             cs (IM.empty, [])
         in
         (if IM.is_empty cs then
@@ -354,7 +354,7 @@ let event t now e =
               let state = Connecting (now, dst, dsts) in
               IM.add id { c with state ; resolved } cs,
               Connect (name, id, dst) :: actions
-            | state -> IM.add id { c with resolved } cs, actions)
+            | _ -> IM.add id { c with resolved } cs, actions)
             cs (IM.empty, [])
         in
         (if IM.is_empty cs then
