@@ -21,14 +21,14 @@ module Log = (val Logs.src_log src : Logs.LOG)
     `v6 --[`v4]--> `both
     `v4 --[`v6]--> `both
 
-   *Resolving* (resolved=`v4) --[Resolved_a]--> Waiting_for_aaaa
-   *Resolving* (resolved=`both) --[Resolved_a]--> Connecting
-   *Resolving* (resolved=`v4) --[Resolved_a_failed]--> Resolving
-   *Resolving* (resolved=`both) --[Resolved_a_failed]--> FAIL
+   *Resolving* (resolved=`none)--[Resolved_a]--> (resolved:=`v4) Waiting_for_aaaa
+   *Resolving* (resolved=`v6)--[Resolved_a]--> (resolved:=`both) Connecting
+   *Resolving* (resolved=`none)--[Resolved_a_failed]--> (resolved:=`v4) Resolving
+   *Resolving* (resolved=`v6--[Resolved_a_failed]--> (resolved:=`both) FAIL
 
-   *Resolving* --[Resolved_aaaa]--> Connecting
-   *Resolving* (resolved=`v6) --[Resolved_aaaa_failed]--> Resolving
-   *Resolving* (resolved=`both) --[Resolved_aaaa_failed]--> FAIL
+   *Resolving* (resolved=`none|`v4)--[Resolved_aaaa]--> Connecting
+   *Resolving* (resolved=`none)--[Resolved_aaaa_failed]--> (resolved:=`v6) Resolving
+   *Resolving* (resolved=`v4)--[Resolved_aaaa_failed]--> (resolved:=`both) FAIL
 
    *Resolving* --[resolve_timeout]--> FAIL
 
@@ -38,7 +38,7 @@ module Log = (val Logs.src_log src : Logs.LOG)
    *Connecting* --[Resolved_a/Resolved_a_failed/Resolved_aaaa/Resolved_aaaa_failed]--> Connecting
    *Connecting* (more options available) --[Connection_failed/connect_timeout]--> Connecting (next)
    *Connecting* (resolved=`v6, no more options available) --[Connection_failed]--> Resolving
-   *Connecting* (no more options available) --[Connection_failed/connect_timeout]--> FAIL
+   *Connecting* (resolved=`both, no more options available) --[Connection_failed/connect_timeout]--> FAIL
 
    *Connecting* --[Connected]--> SUCCESS!
 
@@ -144,31 +144,18 @@ let expand_list_split ips ports =
 let tick now host id conn =
   match
     match conn.state with
-    | Resolving ->
-      if Int64.sub now conn.created > resolve_timeout then
-        Error () (* TODO retry resolution *)
-      else
-        Ok (Resolving, [])
-    | Waiting_for_aaaa (started, ips) ->
-      Log.debug (fun m -> m "waiting_for_aaaa, %Lu > %Lu"
-                    (Int64.sub now started) aaaa_timeout);
-      if Int64.sub now started > aaaa_timeout then
-        let ips =
-          List.map (fun ip -> Ipaddr.V4 ip) (Ipaddr.V4.Set.elements ips)
-        in
-        let dst, dsts = expand_list_split ips conn.ports in
-        Ok (Connecting (now, dst, dsts), [ Connect (host, id, dst) ])
-      else
-        Ok (Waiting_for_aaaa (started, ips), [])
-    | Connecting (started, dst, dsts) ->
-      if Int64.sub now started > connect_timeout then
-        (* TODO cancel previous connection attempt *)
-        match dsts with
-        | [] -> Error ()
-        | dst :: dsts ->
-          Ok (Connecting (now, dst, dsts), [ Connect (host, id, dst) ])
-      else
-        Ok (Connecting (started, dst, dsts), [])
+    | Resolving when Int64.sub now conn.created > resolve_timeout ->
+      Error () (* TODO retry resolution *)
+    | Waiting_for_aaaa (started, ips) when Int64.sub now started > aaaa_timeout ->
+      let ips = List.map (fun ip -> Ipaddr.V4 ip) (Ipaddr.V4.Set.elements ips) in
+      let dst, dsts = expand_list_split ips conn.ports in
+      Ok (Connecting (now, dst, dsts), [ Connect (host, id, dst) ])
+    | Connecting (started, dst, dsts) when Int64.sub now started > connect_timeout->
+      (* TODO cancel previous connection attempt *)
+      (match dsts with
+       | [] -> Error ()
+       | dst :: dsts -> Ok (Connecting (now, dst, dsts), [ Connect (host, id, dst) ]))
+    | x -> Ok (x, [])
   with
   | Ok (state, actions) -> Ok ({ conn with state }, actions)
   | Error () -> Error ()
@@ -273,15 +260,13 @@ let event t now e =
         let cs, actions = IM.fold (fun id c (cs, actions) ->
             let resolved = resolve c.resolved `v4 in
             let state, actions = match c.state with
-              | Resolving ->
-                if resolved = `both then
-                  let ips =
-                    List.map (fun ip -> Ipaddr.V4 ip) (Ipaddr.V4.Set.elements ips)
-                  in
-                  let dst, dsts = expand_list_split ips c.ports in
-                  Connecting (now, dst, dsts), Connect (name, id, dst) :: actions
-                else
-                  Waiting_for_aaaa (now, ips), actions
+              | Resolving when resolved = `both ->
+                let ips =
+                  List.map (fun ip -> Ipaddr.V4 ip) (Ipaddr.V4.Set.elements ips)
+                in
+                let dst, dsts = expand_list_split ips c.ports in
+                Connecting (now, dst, dsts), Connect (name, id, dst) :: actions
+              | Resolving -> Waiting_for_aaaa (now, ips), actions
               | Waiting_for_aaaa (ts, ips') ->
                 Logs.warn (fun m -> m "already waiting for AAAA with %a"
                               Fmt.(list ~sep:(unit ", ") Ipaddr.V4.pp)
@@ -310,7 +295,7 @@ let event t now e =
             match c.state with
             | Resolving when resolved = `both ->
               cs, Connect_failed (name, id) :: actions
-            | state -> IM.add id { c with state ; resolved } cs, actions)
+            | state -> IM.add id { c with resolved } cs, actions)
             cs (IM.empty, [])
         in
         (if IM.is_empty cs then
@@ -369,7 +354,7 @@ let event t now e =
               let state = Connecting (now, dst, dsts) in
               IM.add id { c with state ; resolved } cs,
               Connect (name, id, dst) :: actions
-            | state -> IM.add id { c with state ; resolved } cs, actions)
+            | state -> IM.add id { c with resolved } cs, actions)
             cs (IM.empty, [])
         in
         (if IM.is_empty cs then
@@ -394,15 +379,14 @@ let event t now e =
         | Some c ->
           let is_dst (ip', port') = Ipaddr.compare ip ip' = 0 && port = port' in
           match c.state with
+          | Connecting (_ts, dst, []) when is_dst dst && c.resolved = `both ->
+            let cs = IM.remove id cs in
+            Domain_name.Host_map.add name cs t.conns,
+            [ Connect_failed (name, id) ]
           | Connecting (_ts, dst, []) when is_dst dst ->
-            if c.resolved = `both then
-              let cs = IM.remove id cs in
-              Domain_name.Host_map.add name cs t.conns,
-              [ Connect_failed (name, id) ]
-            else
-              let state = Resolving in
-              let cs = IM.add id { c with state } cs in
-              Domain_name.Host_map.add name cs t.conns, []
+            let state = Resolving in
+            let cs = IM.add id { c with state } cs in
+            Domain_name.Host_map.add name cs t.conns, []
           | Connecting (_ts, dst, ndst :: dsts) when is_dst dst ->
             let state = Connecting (now, ndst, dsts) in
             let cs = IM.add id { c with state } cs in
