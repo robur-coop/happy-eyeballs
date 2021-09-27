@@ -28,9 +28,12 @@ val create : int64 -> t
     [ts] (an arbitrary number that must be monotonically increasing). *)
 
 val timer : t -> int64 -> t * [ `Suspend | `Act of action list ]
-(** [timer t ts] is a timer function that results in an updated [t] and a list
+(** [timer t ts] is a timer function that results in an updated [t] and either
+    [`Suspend] signalling the timer thread can sleep or [`Act actions] a list
     of actions that need to be performed (connection to be retried, connection
-    failures to be repored, ...) *)
+    failures to be repored, ...).
+    The timer thread should be signalled to resume after calling [connect] or
+    [connect_ip]. *)
 
 val connect : t -> int64 -> id:int -> [`host] Domain_name.t -> int list ->
   t * action list
