@@ -66,6 +66,9 @@ let resolve st ev = match st, ev with
 module IM = Map.Make(Int)
 
 type t = {
+  aaaa_timeout : int64 ;
+  connect_timeout : int64 ;
+  resolve_timeout : int64 ;
   started : int64 ;
   conns : connection IM.t Domain_name.Host_map.t ;
 }
@@ -113,10 +116,18 @@ let pp_event ppf = function
     Fmt.pf ppf "%u connected to %a (using %a:%d)" id Domain_name.pp host
       Ipaddr.pp ip port
 
-let create started = {
-  started ;
-  conns = Domain_name.Host_map.empty ;
-}
+let create
+    ?(aaaa_timeout = Duration.of_ms 50)
+    ?(connect_timeout = Duration.of_sec 1)
+    ?(resolve_timeout = Duration.of_sec 1)
+    started =
+  {
+    aaaa_timeout ;
+    connect_timeout ;
+    resolve_timeout ;
+    started ;
+    conns = Domain_name.Host_map.empty ;
+  }
 
 let add_conn host id conn c =
   Domain_name.Host_map.update host
@@ -124,12 +135,6 @@ let add_conn host id conn c =
       | None -> Some (IM.singleton id conn)
       | Some cs -> Some (IM.add id conn cs))
     c
-
-let aaaa_timeout = Duration.of_ms 50
-
-let connect_timeout = Duration.of_sec 1
-
-let resolve_timeout = Duration.of_sec 1
 
 let expand_list ips ports =
   List.concat_map (fun ip -> List.map (fun p -> (ip, p)) ports) ips
@@ -140,16 +145,16 @@ let expand_list_split ips ports =
   | hd :: tl -> hd, tl
   | _ -> failwith "ips or ports are empty"
 
-let tick now host id conn =
+let tick t now host id conn =
   match
     match conn.state with
-    | Resolving when Int64.sub now conn.created > resolve_timeout ->
+    | Resolving when Int64.sub now conn.created > t.resolve_timeout ->
       Error () (* TODO retry resolution *)
-    | Waiting_for_aaaa (started, ips) when Int64.sub now started > aaaa_timeout ->
+    | Waiting_for_aaaa (started, ips) when Int64.sub now started > t.aaaa_timeout ->
       let ips = List.map (fun ip -> Ipaddr.V4 ip) (Ipaddr.V4.Set.elements ips) in
       let dst, dsts = expand_list_split ips conn.ports in
       Ok (Connecting (now, dst, dsts), [ Connect (host, id, dst) ])
-    | Connecting (started, _dst, dsts) when Int64.sub now started > connect_timeout->
+    | Connecting (started, _dst, dsts) when Int64.sub now started > t.connect_timeout->
       (* TODO cancel previous connection attempt *)
       (match dsts with
        | [] -> Error ()
@@ -162,17 +167,17 @@ let tick now host id conn =
 let timer t now =
   Log.debug (fun m -> m "timer");
   let conns, actions =
-    Domain_name.Host_map.fold (fun host v (t, actions) ->
+    Domain_name.Host_map.fold (fun host v (dm, actions) ->
         let v, actions = IM.fold (fun id conn (acc, actions) ->
-            match tick now host id conn with
+            match tick t now host id conn with
             | Ok (conn, action) -> IM.add id conn acc, actions @ action
             | Error () -> acc, actions @ [ Connect_failed (host, id) ]
           ) v (IM.empty, actions)
         in
-        let t =
-          if IM.cardinal v = 0 then t else Domain_name.Host_map.add host v t
+        let dm =
+          if IM.cardinal v = 0 then dm else Domain_name.Host_map.add host v dm
         in
-        t, actions) t.conns (Domain_name.Host_map.empty, [])
+        dm, actions) t.conns (Domain_name.Host_map.empty, [])
   in
   Log.debug (fun m -> m "timer %d actions" (List.length actions));
   { t with conns },

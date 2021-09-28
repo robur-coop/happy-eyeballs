@@ -11,14 +11,13 @@
 let src = Logs.Src.create "happy-eyeballs.lwt" ~doc:"Happy Eyeballs Lwt"
 module Log = (val Logs.src_log src : Logs.LOG)
 
-let he_timer = Duration.of_ms 10
-
 let now = Mtime_clock.elapsed_ns
 
 type t = {
   mutable waiters : ((Ipaddr.t * int) * Lwt_unix.file_descr, [ `Msg of string ]) result Lwt.u Happy_eyeballs.Waiter_map.t ;
   mutable he : Happy_eyeballs.t ;
   dns : Dns_client_lwt.t ;
+  timer_interval : float ;
   timer_condition : unit Lwt_condition.t ;
 }
 
@@ -122,19 +121,20 @@ let rec timer t =
       timer t
     | `Act actions ->
       handle_timer_actions t actions ;
-      Lwt_unix.sleep (Duration.to_f he_timer) >>= fun () ->
+      Lwt_unix.sleep t.timer_interval >>= fun () ->
       loop ()
   in
   Lwt_condition.wait t.timer_condition >>= fun () ->
   loop ()
 
-let create () =
+let create ?aaaa_timeout ?connect_timeout ?resolve_timeout ?(timer_interval = Duration.of_ms 10) () =
   let waiters = Happy_eyeballs.Waiter_map.empty
-  and he = Happy_eyeballs.create (now ())
+  and he = Happy_eyeballs.create ?aaaa_timeout ?connect_timeout ?resolve_timeout (now ())
   and dns = Dns_client_lwt.create ()
   and timer_condition = Lwt_condition.create ()
   in
-  let t = { waiters ; he ; dns ; timer_condition } in
+  let timer_interval = Duration.to_f timer_interval in
+  let t = { waiters ; he ; dns ; timer_interval ; timer_condition } in
   Lwt.async (fun () -> timer t);
   t
 

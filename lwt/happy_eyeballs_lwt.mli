@@ -1,7 +1,8 @@
 (** The type of the abstract state of happy eyeballs. *)
 type t
 
-val create : unit -> t
+val create : ?aaaa_timeout:int64 -> ?connect_timeout:int64 ->
+  ?resolve_timeout:int64 -> ?timer_interval:int64 -> unit -> t
 (** [create ()] creates an initial state of happy eyeballs. *)
 
 val connect_host : t -> [`host] Domain_name.t -> int list ->

@@ -23,9 +23,11 @@ type event =
 val pp_event : event Fmt.t
 (** [pp_event ppf e] pretty-prints event [e] on [ppf]. *)
 
-val create : int64 -> t
-(** [create ts] creates the internal state, initialized with the timestamp
-    [ts] (an arbitrary number that must be monotonically increasing). *)
+val create : ?aaaa_timeout:int64 -> ?connect_timeout:int64 ->
+  ?resolve_timeout:int64 -> int64 -> t
+(** [create ~aaaa_timeout ~connect_timeout ~resolve_timeout ts] creates the
+    internal state, initialized with the timestamp [ts] (an arbitrary number
+    that must be monotonically increasing). *)
 
 val timer : t -> int64 -> t * [ `Suspend | `Act of action list ]
 (** [timer t ts] is a timer function that results in an updated [t] and either
