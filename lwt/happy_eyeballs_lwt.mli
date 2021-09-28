@@ -3,7 +3,9 @@ type t
 
 val create : ?aaaa_timeout:int64 -> ?connect_timeout:int64 ->
   ?resolve_timeout:int64 -> ?timer_interval:int64 -> unit -> t
-(** [create ()] creates an initial state of happy eyeballs. *)
+(** [create ~aaaa_timeout ~connect_timeout ~resolve_timeout ~timer_interval ()]
+    creates an initial state of happy eyeballs with the specified timeouts in
+    nanoseconds - the default for [timer_interval] is [Duration.of_ms 10]. *)
 
 val connect_host : t -> [`host] Domain_name.t -> int list ->
   ((Ipaddr.t * int) * Lwt_unix.file_descr, [ `Msg of string ]) result Lwt.t

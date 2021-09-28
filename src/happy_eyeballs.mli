@@ -27,7 +27,10 @@ val create : ?aaaa_timeout:int64 -> ?connect_timeout:int64 ->
   ?resolve_timeout:int64 -> int64 -> t
 (** [create ~aaaa_timeout ~connect_timeout ~resolve_timeout ts] creates the
     internal state, initialized with the timestamp [ts] (an arbitrary number
-    that must be monotonically increasing). *)
+    that must be monotonically increasing). The timeouts are specified in
+    nanoseconds: the default of [aaaa_timeout] is [Duration.of_ms 50],
+    [connect_timeout] and [resolve_timeout] use a default of
+    [Duration.of_sec 1]. *)
 
 val timer : t -> int64 -> t * [ `Suspend | `Act of action list ]
 (** [timer t ts] is a timer function that results in an updated [t] and either
