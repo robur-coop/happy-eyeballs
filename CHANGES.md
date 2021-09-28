@@ -1,3 +1,8 @@
+## v0.0.7 (2021-09-28)
+
+* Document changes of the return value of timer (#11 @reynir)
+* Pass timeouts as duration into the create functions (#12 @hannesm)
+
 ## v0.0.6 (2021-09-21)
 
 * return a variant from timer to indicate whether there are connections pending
