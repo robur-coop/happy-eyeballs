@@ -23,15 +23,20 @@ type event =
 val pp_event : event Fmt.t
 (** [pp_event ppf e] pretty-prints event [e] on [ppf]. *)
 
-val create : int64 -> t
-(** [create ts] creates the internal state, initialized with the timestamp
-    [ts] (an arbitrary number that must be monotonically increasing). *)
+val create : ?aaaa_timeout:int64 -> ?connect_timeout:int64 ->
+  ?resolve_timeout:int64 -> int64 -> t
+(** [create ~aaaa_timeout ~connect_timeout ~resolve_timeout ts] creates the
+    internal state, initialized with the timestamp [ts] (an arbitrary number
+    that must be monotonically increasing). The timeouts are specified in
+    nanoseconds: the default of [aaaa_timeout] is [Duration.of_ms 50],
+    [connect_timeout] and [resolve_timeout] use a default of
+    [Duration.of_sec 1]. *)
 
 val timer : t -> int64 -> t * [ `Suspend | `Act of action list ]
 (** [timer t ts] is a timer function that results in an updated [t] and either
     [`Suspend] signalling the timer thread can sleep or [`Act actions] a list
     of actions that need to be performed (connection to be retried, connection
-    failures to be repored, ...).
+    failures to be reported, ...).
     The timer thread should be signalled to resume after calling [connect] or
     [connect_ip]. *)
 
