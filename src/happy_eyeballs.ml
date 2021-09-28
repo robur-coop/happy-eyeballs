@@ -157,7 +157,7 @@ let tick t now host id conn =
     | Connecting (started, _dst, dsts) when Int64.sub now started > t.connect_timeout->
       (* TODO cancel previous connection attempt *)
       (match dsts with
-       | [] -> Error ()
+       | [] -> if conn.resolved = `both then Error () else Ok (Resolving, [])
        | dst :: dsts -> Ok (Connecting (now, dst, dsts), [ Connect (host, id, dst) ]))
     | x -> Ok (x, [])
   with
