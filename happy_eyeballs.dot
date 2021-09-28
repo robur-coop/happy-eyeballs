@@ -1,0 +1,35 @@
+digraph G {
+RESOLVING;
+
+WAITING_FOR_AAAA;
+
+CONNECTING;
+
+FAILED;
+SUCCESS;
+
+RESOLVING_none -> WAITING_FOR_AAAA [label="resolved_a"];
+RESOLVING_none -> RESOLVING_v4 [label="resolved_a_failed"];
+RESOLVING_v6 -> CONNECTING [label="resolved_a"];
+
+RESOLVING_none -> CONNECTING [label="resolved_aaaa"];
+RESOLVING_v4 -> CONNECTING [label="resolved_aaaa"];
+RESOLVING_none -> RESOLVING_v6 [label="resolved_aaaa_failed"];
+
+RESOLVING -> FAILED [label="resolve_timeout"];
+RESOLVING_v4 -> FAILED [label="resolved_aaaa_failed, resolve_timeout"];
+RESOLVING_v6 -> FAILED [label="resolved_a_failed, resolve_timeout"];
+
+WAITING_FOR_AAAA -> CONNECTING [label="resolved_aaaa"];
+WAITING_FOR_AAAA -> CONNECTING [label="resolved_aaaa_failed"];
+WAITING_FOR_AAAA -> CONNECTING [label="aaaa_timeout"];
+WAITING_FOR_AAAA -> WAITING_FOR_AAAA [label="resolved_a"];
+WAITING_FOR_AAAA -> WAITING_FOR_AAAA [label="resolved_a_failed"];
+
+CONNECTING -> CONNECTING [label="resolved_a, resolved_a_failed, resolved_aaaa, resolved_aaaa_failed"];
+CONNECTING -> CONNECTING [label="connection_failed, connect_timeout\nmore options available"];
+CONNECTING -> RESOLVING_v6 [label="connection_failed, connect_timeout\nresolving was not both"];
+CONNECTING -> FAILED [label="connection_failed, connect_timeout\nno more options"];
+
+CONNECTING -> SUCCESS [label="connected"];
+}
