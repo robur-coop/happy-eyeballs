@@ -85,7 +85,6 @@ let pp_action ppf = function
   | Connect_failed (host, id) ->
     Fmt.pf ppf "%u connect failed %a" id Domain_name.pp host
 
-(* it likely makes sense to record resolving_failed events as well *)
 type event =
   | Resolved_a of [`host] Domain_name.t * Ipaddr.V4.Set.t
   | Resolved_aaaa of [`host] Domain_name.t * Ipaddr.V6.Set.t
