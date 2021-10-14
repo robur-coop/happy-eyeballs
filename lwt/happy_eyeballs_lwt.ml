@@ -55,7 +55,7 @@ let rec act t action =
         Dns_client_lwt.getaddrinfo t.dns Dns.Rr_map.A host >|= function
         | Ok (_, res) ->
           let r =
-            Dns.Rr_map.Ipv4_set.fold Ipaddr.V4.Set.add
+            Ipaddr.V4.Set.fold Ipaddr.V4.Set.add
               res Ipaddr.V4.Set.empty
           in
           Ok (Happy_eyeballs.Resolved_a (host, r))
@@ -66,7 +66,7 @@ let rec act t action =
         Dns_client_lwt.getaddrinfo t.dns Dns.Rr_map.Aaaa host >|= function
         | Ok (_, res) ->
           let r =
-            Dns.Rr_map.Ipv6_set.fold Ipaddr.V6.Set.add
+            Ipaddr.V6.Set.fold Ipaddr.V6.Set.add
               res Ipaddr.V6.Set.empty
           in
           Ok (Happy_eyeballs.Resolved_aaaa (host, r))
@@ -170,7 +170,7 @@ let connect_ip t addresses =
   waiter >|= fun r ->
   Log.debug (fun m -> m "connection %s to %a after %a"
                 (match r with Ok _ -> "ok" | Error _ -> "failed")
-                Fmt.(list ~sep:(unit ", ") (pair ~sep:(unit ":") Ipaddr.pp int))
+                Fmt.(list ~sep:(any ", ") (pair ~sep:(any ":") Ipaddr.pp int))
                 addresses
                 Duration.pp (Int64.sub (now ()) ts));
   r

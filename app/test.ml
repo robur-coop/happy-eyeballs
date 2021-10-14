@@ -4,7 +4,7 @@ let jump () host ports =
   let t = Happy_eyeballs_lwt.create () in
   Lwt_main.run (
     Logs.app (fun m -> m "connecting to %s (on ports %a)" host
-                 Fmt.(list ~sep:(unit ", ") int) ports);
+                 Fmt.(list ~sep:(any ", ") int) ports);
     Happy_eyeballs_lwt.connect t host ports >>= function
     | Ok ((ip, port), fd) ->
       Logs.app (fun m -> m "connected to %a:%d" Ipaddr.pp ip port);

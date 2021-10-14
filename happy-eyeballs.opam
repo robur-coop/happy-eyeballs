@@ -13,7 +13,7 @@ depends: [
   "duration"
   "domain-name" {>= "0.2.0"}
   "ipaddr" {>= "5.2.0"}
-  "fmt"
+  "fmt" {>= "0.8.7"}
   "logs"
   "rresult"
 ]
