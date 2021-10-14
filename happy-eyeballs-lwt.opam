@@ -33,3 +33,8 @@ Happy eyeballs is an implementation of RFC 8305 which specifies how to connect
 to a remote host using either IP protocol version 4 or IP protocol version 6.
 This uses Lwt and Lwt_unix for side effects.
 """
+
+pin-depends: [
+  [ "dns.dev" "git+https://github.com/mirage/ocaml-dns.git#1cc956368241beca6157eb4a3351174837e2bbd5" ]
+  [ "dns-client.dev" "git+https://github.com/mirage/ocaml-dns.git#1cc956368241beca6157eb4a3351174837e2bbd5" ]
+]
