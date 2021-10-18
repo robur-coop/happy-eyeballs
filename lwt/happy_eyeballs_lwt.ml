@@ -181,7 +181,5 @@ let connect t host ports =
   | Error _ ->
     let open Lwt_result.Infix in
     Lwt_result.lift
-      (let open Rresult.R.Infix in
-       Domain_name.of_string host >>= fun dn ->
-       Domain_name.host dn) >>= fun host ->
-    connect_host t host ports
+      (Result.bind (Domain_name.of_string host) Domain_name.host) >>= fun h ->
+    connect_host t h ports

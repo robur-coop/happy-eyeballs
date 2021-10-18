@@ -26,7 +26,7 @@ module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) 
   let try_connect stack ip port =
     let open Lwt.Infix in
     S.TCP.create_connection (S.tcp stack) (ip, port) >|= fun r ->
-    Rresult.R.reword_error
+    Result.map_error
       (fun err -> `Msg (Fmt.to_to_string S.TCP.pp_error err)) r
 
   let rec act t action =
@@ -164,8 +164,6 @@ module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) 
     | Error _ ->
       let open Lwt_result.Infix in
       Lwt_result.lift
-        (let open Rresult.R.Infix in
-         Domain_name.of_string host >>= fun dn ->
-         Domain_name.host dn) >>= fun host ->
-      connect_host t host ports
+        (Result.bind (Domain_name.of_string host) Domain_name.host) >>= fun h ->
+      connect_host t h ports
 end

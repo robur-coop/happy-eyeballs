@@ -22,7 +22,6 @@ depends: [
   "mirage-stack" {>= "2.2.0"}
   "mirage-random" {>= "2.0.0"}
   "mirage-time" {>= "2.0.0"}
-  "rresult"
 ]
 build: [
   ["dune" "subst"] {dev}
