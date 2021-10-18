@@ -170,7 +170,7 @@ let connect_ip t addresses =
   waiter >|= fun r ->
   Log.debug (fun m -> m "connection %s to %a after %a"
                 (match r with Ok _ -> "ok" | Error _ -> "failed")
-                Fmt.(list ~sep:(unit ", ") (pair ~sep:(unit ":") Ipaddr.pp int))
+                Fmt.(list ~sep:(any ", ") (pair ~sep:(any ":") Ipaddr.pp int))
                 addresses
                 Duration.pp (Int64.sub (now ()) ts));
   r

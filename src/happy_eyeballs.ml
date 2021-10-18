@@ -99,11 +99,11 @@ type event =
 let pp_event ppf = function
   | Resolved_a (host, ips) ->
     Fmt.pf ppf "resolved A %a: %a" Domain_name.pp host
-      Fmt.(list ~sep:(unit ", ") Ipaddr.V4.pp)
+      Fmt.(list ~sep:(any ", ") Ipaddr.V4.pp)
       (Ipaddr.V4.Set.elements ips)
   | Resolved_aaaa (host, ips) ->
     Fmt.pf ppf "resolved AAAA %a: %a" Domain_name.pp host
-      Fmt.(list ~sep:(unit ", ") Ipaddr.V6.pp)
+      Fmt.(list ~sep:(any ", ") Ipaddr.V6.pp)
       (Ipaddr.V6.Set.elements ips)
   | Resolved_a_failed host ->
     Fmt.pf ppf "resolve A failed for %a" Domain_name.pp host
@@ -280,7 +280,7 @@ let event t now e =
               | Resolving -> Waiting_for_aaaa (now, ips), actions
               | Waiting_for_aaaa (ts, ips') ->
                 Logs.warn (fun m -> m "already waiting for AAAA with %a"
-                              Fmt.(list ~sep:(unit ", ") Ipaddr.V4.pp)
+                              Fmt.(list ~sep:(any ", ") Ipaddr.V4.pp)
                               (Ipaddr.V4.Set.elements ips'));
                 Waiting_for_aaaa (ts, Ipaddr.V4.Set.union ips' ips), actions
               | Connecting (ts, dst, dsts) ->
