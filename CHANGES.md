@@ -1,3 +1,9 @@
+## v0.0.8 (2021-10-20)
+
+* Adapt to dns 6.0.0 API (#15 @hannesm)
+* Drop rresult dependency
+* Avoid deprecated fmt functions, require fmt 0.8.7
+
 ## v0.0.7 (2021-09-28)
 
 * Document changes of the return value of timer (#11 @reynir)

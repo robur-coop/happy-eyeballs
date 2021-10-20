@@ -53,23 +53,13 @@ let rec act t action =
     | Happy_eyeballs.Resolve_a host ->
       begin
         Dns_client_lwt.getaddrinfo t.dns Dns.Rr_map.A host >|= function
-        | Ok (_, res) ->
-          let r =
-            Dns.Rr_map.Ipv4_set.fold Ipaddr.V4.Set.add
-              res Ipaddr.V4.Set.empty
-          in
-          Ok (Happy_eyeballs.Resolved_a (host, r))
+        | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_a (host, res))
         | Error _ -> Ok (Happy_eyeballs.Resolved_a_failed host)
       end
     | Happy_eyeballs.Resolve_aaaa host ->
       begin
         Dns_client_lwt.getaddrinfo t.dns Dns.Rr_map.Aaaa host >|= function
-        | Ok (_, res) ->
-          let r =
-            Dns.Rr_map.Ipv6_set.fold Ipaddr.V6.Set.add
-              res Ipaddr.V6.Set.empty
-          in
-          Ok (Happy_eyeballs.Resolved_aaaa (host, r))
+        | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_aaaa (host, res))
         | Error _ -> Ok (Happy_eyeballs.Resolved_aaaa_failed host)
       end
     | Happy_eyeballs.Connect (host, id, (ip, port)) ->

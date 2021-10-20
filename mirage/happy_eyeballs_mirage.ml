@@ -12,7 +12,7 @@ let src = Logs.Src.create "happy-eyeballs.mirage" ~doc:"Happy Eyeballs Mirage"
 module Log = (val Logs.src_log src : Logs.LOG)
 
 module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) (P : Mirage_clock.PCLOCK) (S : Mirage_stack.V4V6) = struct
-  module DNS = Dns_client_mirage.Make(R)(T)(C)(S)
+  module DNS = Dns_client_mirage.Make(R)(T)(C)(P)(S)
 
   type t = {
     dns : DNS.t ;
@@ -37,23 +37,13 @@ module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) 
       | Happy_eyeballs.Resolve_a host ->
         begin
           DNS.getaddrinfo t.dns Dns.Rr_map.A host >|= function
-          | Ok (_, res) ->
-            let r =
-              Dns.Rr_map.Ipv4_set.fold Ipaddr.V4.Set.add
-                res Ipaddr.V4.Set.empty
-            in
-            Ok (Happy_eyeballs.Resolved_a (host, r))
+          | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_a (host, res))
           | Error _ -> Ok (Happy_eyeballs.Resolved_a_failed host)
         end
       | Happy_eyeballs.Resolve_aaaa host ->
         begin
           DNS.getaddrinfo t.dns Dns.Rr_map.Aaaa host >|= function
-          | Ok (_, res) ->
-            let r =
-              Dns.Rr_map.Ipv6_set.fold Ipaddr.V6.Set.add
-                res Ipaddr.V6.Set.empty
-            in
-            Ok (Happy_eyeballs.Resolved_aaaa (host, r))
+          | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_aaaa (host, res))
           | Error _ -> Ok (Happy_eyeballs.Resolved_aaaa_failed host)
         end
       | Happy_eyeballs.Connect (host, id, (ip, port)) ->
