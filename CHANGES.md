@@ -1,3 +1,9 @@
+## v0.1.0 (2021-10-27)
+
+* Remove assertion in timer, and fix the code (reported by @dinosaure in #17,
+  fix in #18 by @hannesm, reviewed by @reynir)
+* Support OCaml 4.08 (#18 hannesm, requested in #16 by @smorimoto)
+
 ## v0.0.8 (2021-10-20)
 
 * Adapt to dns 6.0.0 API (#15 @hannesm)
