@@ -137,7 +137,7 @@ let add_conn host id conn c =
     c
 
 let expand_list ips ports =
-  List.concat_map (fun ip -> List.map (fun p -> (ip, p)) ports) ips
+  List.flatten (List.map (fun ip -> List.map (fun p -> (ip, p)) ports) ips)
 
 (* all input has been verified that ips and ports are non-empty. *)
 let expand_list_split ips ports =
@@ -181,10 +181,8 @@ let timer t now =
   in
   Log.debug (fun m -> m "timer %d actions" (List.length actions));
   { t with conns },
-  if Domain_name.Host_map.is_empty conns then
-    (assert (actions = []); `Suspend)
-  else
-    `Act actions
+  (if Domain_name.Host_map.is_empty conns then `Suspend else `Act),
+  actions
 
 let connect t now ~id host ports =
   if ports = [] then failwith "empty port list not supported";
