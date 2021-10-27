@@ -137,7 +137,7 @@ let add_conn host id conn c =
     c
 
 let expand_list ips ports =
-  List.concat_map (fun ip -> List.map (fun p -> (ip, p)) ports) ips
+  List.flatten (List.map (fun ip -> List.map (fun p -> (ip, p)) ports) ips)
 
 (* all input has been verified that ips and ports are non-empty. *)
 let expand_list_split ips ports =
