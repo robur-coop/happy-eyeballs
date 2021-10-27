@@ -104,13 +104,13 @@ let handle_timer_actions t actions =
 let rec timer t =
   let open Lwt.Infix in
   let rec loop () =
-    let he, actions = Happy_eyeballs.timer t.he (now ()) in
+    let he, cont, actions = Happy_eyeballs.timer t.he (now ()) in
     t.he <- he ;
-    match actions with
+    handle_timer_actions t actions ;
+    match cont with
     | `Suspend ->
       timer t
-    | `Act actions ->
-      handle_timer_actions t actions ;
+    | `Act ->
       Lwt_unix.sleep t.timer_interval >>= fun () ->
       loop ()
   in

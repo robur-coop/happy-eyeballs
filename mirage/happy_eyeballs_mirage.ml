@@ -88,13 +88,13 @@ module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) 
   let rec timer t =
     let open Lwt.Infix in
     let rec loop () =
-      let he, actions = Happy_eyeballs.timer t.he (C.elapsed_ns ()) in
+      let he, cont, actions = Happy_eyeballs.timer t.he (C.elapsed_ns ()) in
       t.he <- he ;
-      match actions with
+      handle_timer_actions t actions ;
+      match cont with
       | `Suspend ->
         timer t
-      | `Act actions ->
-        handle_timer_actions t actions ;
+      | `Act ->
         T.sleep_ns t.timer_interval >>= fun () ->
         loop ()
     in

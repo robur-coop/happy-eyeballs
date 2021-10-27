@@ -32,11 +32,12 @@ val create : ?aaaa_timeout:int64 -> ?connect_timeout:int64 ->
     [connect_timeout] and [resolve_timeout] use a default of
     [Duration.of_sec 1]. *)
 
-val timer : t -> int64 -> t * [ `Suspend | `Act of action list ]
+val timer : t -> int64 -> t * [ `Suspend | `Act ] * action list
 (** [timer t ts] is a timer function that results in an updated [t] and either
-    [`Suspend] signalling the timer thread can sleep or [`Act actions] a list
-    of actions that need to be performed (connection to be retried, connection
-    failures to be reported, ...).
+    [`Suspend] signalling the timer thread can sleep or [`Act] that the timer
+    should be called again. In addition, a list of actions that need to be
+    performed (connection to be retried, connection failures to be reported,
+    ...) is provided.
     The timer thread should be signalled to resume after calling [connect] or
     [connect_ip]. *)
 
