@@ -1,49 +1,6 @@
 let src = Logs.Src.create "happy-eyeballs" ~doc:"Happy Eyeballs"
 module Log = (val Logs.src_log src : Logs.LOG)
 
-(* A connection is attempted to [set of ips] * [sequence of ports], with the
-   first successful socket being returned.
-
-   The [set of ips] is either provided manually or by DNS resolution.
-   Connections to IPv6 addresses is prefered, and connection attempts are mixed
-   between IP protocols (first, an IPv6, then IPv4, then IPv6, ...) if
-   available. If only one protocol family is available, this is used. *)
-
-(* The state machine of a connection, constructors
-   - connect (initial state: Resolving, actions: Resolve_a & Resolve_aaaa)
-   - connect_ip (initial state: Connecting, action: Connect)
-
-   Since resolution is done in parallel for IPv4 and IPv6 (and both may result
-   in failure), that is tracked as well (in the "resolved" field of a
-   connection, this transition is done before state transition):
-    `none --[`v4]--> `v4
-    `none --[`v6]--> `v6
-    `v6 --[`v4]--> `both
-    `v4 --[`v6]--> `both
-
-   *Resolving* (resolved=`none)--[Resolved_a]--> (resolved:=`v4) Waiting_for_aaaa
-   *Resolving* (resolved=`v6)--[Resolved_a]--> (resolved:=`both) Connecting
-   *Resolving* (resolved=`none)--[Resolved_a_failed]--> (resolved:=`v4) Resolving
-   *Resolving* (resolved=`v6--[Resolved_a_failed]--> (resolved:=`both) FAIL
-
-   *Resolving* (resolved=`none|`v4)--[Resolved_aaaa]--> Connecting
-   *Resolving* (resolved=`none)--[Resolved_aaaa_failed]--> (resolved:=`v6) Resolving
-   *Resolving* (resolved=`v4)--[Resolved_aaaa_failed]--> (resolved:=`both) FAIL
-
-   *Resolving* --[resolve_timeout]--> FAIL
-
-   *Waiting_for_aaaa* --[Resolved_aaaa/Resolved_aaaa_failed/aaaa_timeout]--> Connecting
-   *Waiting_for_aaaa* --[Resolved_a/Resolved_a_failed]--> Waiting_for_aaaa
-
-   *Connecting* --[Resolved_a/Resolved_a_failed/Resolved_aaaa/Resolved_aaaa_failed]--> Connecting
-   *Connecting* (more options available) --[Connection_failed/connect_timeout]--> Connecting (next)
-   *Connecting* (resolved=`v6, no more options available) --[Connection_failed]--> Resolving
-   *Connecting* (resolved=`both, no more options available) --[Connection_failed/connect_timeout]--> FAIL
-
-   *Connecting* --[Connected]--> SUCCESS!
-
-*)
-
 type conn_state =
   | Resolving
   | Waiting_for_aaaa of int64 * Ipaddr.V4.Set.t (* TODO ensure non-empty set *)

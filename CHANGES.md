@@ -1,3 +1,14 @@
+## v0.1.1 (2021-11-18)
+
+* Happy_eyeballs_lwt.create and Happy_eyeballs_mirage.create now take an
+  optional ?happy_eyeballs:Happy_eyeballs.t argument, and also an optional
+  ?dns:Dns_client_lwt.t/DNS.t argument. This avoids the need to forward all
+  potential creation arguments of Happy_eyeballs and DNS. (#91 @hannesm)
+* Fix state machine: if Connecting fails, and resolved is not yet both, return
+  to Resolving (instead of Error) (#13 @hannesm,
+  similar to d0d4ef5ea2aaf2de407ba84742c5648489c47e1f #9)
+* Add a state machine diagram (happy_eyeballs.dot) (#13 @hannesm)
+
 ## v0.1.0 (2021-10-27)
 
 * Remove assertion in timer, and fix the code (reported by @dinosaure in #17,

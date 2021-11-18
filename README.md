@@ -8,6 +8,10 @@ connectivity via IPv4 only, IPv6 only, or both. The preference is to use IPv6.
 This package implements the given RFC in its core (Happy_eyeballs module).
 In addition, the Happy_eyeballs_lwt is a Lwt implementation using Unix.
 
+The implemented [state machine](https://data.robur.coop/happy_eyeballs.pdf) is
+kept in-sync with the code (source: happy_eyeballs.dot at the root of this
+repository).
+
 It is licensed under the ISC license.
 
 Installation:
