@@ -101,12 +101,11 @@ module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) 
     Lwt_condition.wait t.timer_condition >>= fun () ->
     loop ()
 
-  let create ?aaaa_timeout ?connect_timeout ?resolve_timeout ?(timer_interval = Duration.of_ms 10) stack =
-    let dns = DNS.create stack
-    and he = Happy_eyeballs.create ?aaaa_timeout ?connect_timeout ?resolve_timeout (C.elapsed_ns ())
+  let create ?(happy_eyeballs = Happy_eyeballs.create (C.elapsed_ns ())) ?dns ?(timer_interval = Duration.of_ms 10) stack =
+    let dns = match dns with None -> DNS.create stack | Some x -> x
     and timer_condition = Lwt_condition.create ()
     in
-    let t = { dns ; stack ; waiters = Happy_eyeballs.Waiter_map.empty ; he ; timer_interval ; timer_condition } in
+    let t = { dns ; stack ; waiters = Happy_eyeballs.Waiter_map.empty ; he = happy_eyeballs ; timer_interval ; timer_condition } in
     Lwt.async (fun () -> timer t);
     t
 

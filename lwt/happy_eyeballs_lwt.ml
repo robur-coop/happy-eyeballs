@@ -117,14 +117,12 @@ let rec timer t =
   Lwt_condition.wait t.timer_condition >>= fun () ->
   loop ()
 
-let create ?aaaa_timeout ?connect_timeout ?resolve_timeout ?(timer_interval = Duration.of_ms 10) () =
+let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?(dns = Dns_client_lwt.create ()) ?(timer_interval = Duration.of_ms 10) () =
   let waiters = Happy_eyeballs.Waiter_map.empty
-  and he = Happy_eyeballs.create ?aaaa_timeout ?connect_timeout ?resolve_timeout (now ())
-  and dns = Dns_client_lwt.create ()
   and timer_condition = Lwt_condition.create ()
   in
   let timer_interval = Duration.to_f timer_interval in
-  let t = { waiters ; he ; dns ; timer_interval ; timer_condition } in
+  let t = { waiters ; he = happy_eyeballs ; dns ; timer_interval ; timer_condition } in
   Lwt.async (fun () -> timer t);
   t
 
