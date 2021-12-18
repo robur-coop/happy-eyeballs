@@ -1,9 +1,14 @@
+## v0.1.2 (2021-12-17)
+
+* Happy_eyeballs_{lwt,mirage}: update to tcpip 7.0.0, remove mirage-stack
+  dependency (#20 @dinosaure)
+
 ## v0.1.1 (2021-11-18)
 
 * Happy_eyeballs_lwt.create and Happy_eyeballs_mirage.create now take an
   optional ?happy_eyeballs:Happy_eyeballs.t argument, and also an optional
   ?dns:Dns_client_lwt.t/DNS.t argument. This avoids the need to forward all
-  potential creation arguments of Happy_eyeballs and DNS. (#91 @hannesm)
+  potential creation arguments of Happy_eyeballs and DNS. (#19 @hannesm)
 * Fix state machine: if Connecting fails, and resolved is not yet both, return
   to Resolving (instead of Error) (#13 @hannesm,
   similar to d0d4ef5ea2aaf2de407ba84742c5648489c47e1f #9)
