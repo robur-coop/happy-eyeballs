@@ -23,14 +23,16 @@ type event =
 val pp_event : event Fmt.t
 (** [pp_event ppf e] pretty-prints event [e] on [ppf]. *)
 
-val create : ?aaaa_timeout:int64 -> ?connect_timeout:int64 ->
-  ?resolve_timeout:int64 -> int64 -> t
-(** [create ~aaaa_timeout ~connect_timeout ~resolve_timeout ts] creates the
-    internal state, initialized with the timestamp [ts] (an arbitrary number
-    that must be monotonically increasing). The timeouts are specified in
-    nanoseconds: the default of [aaaa_timeout] is [Duration.of_ms 50],
-    [connect_timeout] and [resolve_timeout] use a default of
-    [Duration.of_sec 1]. *)
+val create : ?aaaa_timeout:int64 -> ?v6_connect_timeout:int64 ->
+  ?connect_timeout:int64 -> ?resolve_timeout:int64 -> ?resolve_retries:int ->
+  int64 -> t
+(** [create ~aaaa_timeout ~v6_connect_timeout ~connect_timeout ~resolve_timeout ~resolve_retries ts]
+    creates the internal state, initialized with the timestamp [ts] (an
+    arbitrary number that must be monotonically increasing). The timeouts are
+    specified in nanoseconds: the default of [aaaa_timeout] is
+    [Duration.of_ms 50], [v6_connect_timeout] is [Duration.of_ms 200],
+    [connect_timeout] is [Duration.of_sec 10], and [resolve_timeout] is
+    [Duration.of_sec 1]. The [resolve_retries] defaults to 3. *)
 
 val timer : t -> int64 -> t * [ `Suspend | `Act ] * action list
 (** [timer t ts] is a timer function that results in an updated [t] and either

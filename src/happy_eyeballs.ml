@@ -11,6 +11,7 @@ type connection = {
   state : conn_state ;
   ports : int list ;
   resolved : [ `none | `v4 | `v6 | `both ] ;
+  resolve_left : int ;
 }
 
 let resolve st ev = match st, ev with
@@ -24,9 +25,11 @@ module IM = Map.Make(Int)
 
 type t = {
   aaaa_timeout : int64 ;
+  v6_connect_timeout : int64 ;
   connect_timeout : int64 ;
   resolve_timeout : int64 ;
   started : int64 ;
+  resolve_retries : int ;
   conns : connection IM.t Domain_name.Host_map.t ;
 }
 
@@ -75,13 +78,17 @@ let pp_event ppf = function
 
 let create
     ?(aaaa_timeout = Duration.of_ms 50)
-    ?(connect_timeout = Duration.of_sec 1)
+    ?(v6_connect_timeout = Duration.of_ms 200)
+    ?(connect_timeout = Duration.of_sec 10)
     ?(resolve_timeout = Duration.of_sec 1)
+    ?(resolve_retries = 3)
     started =
   {
     aaaa_timeout ;
+    v6_connect_timeout ;
     connect_timeout ;
     resolve_timeout ;
+    resolve_retries ;
     started ;
     conns = Domain_name.Host_map.empty ;
   }
@@ -103,26 +110,49 @@ let expand_list_split ips ports =
   | _ -> failwith "ips or ports are empty"
 
 let tick t now host id conn =
-  match
-    match conn.state with
-    | Resolving when Int64.sub now conn.created > t.resolve_timeout ->
-      Error () (* TODO retry resolution *)
-    | Waiting_for_aaaa (started, ips) when Int64.sub now started > t.aaaa_timeout ->
-      let ips = List.map (fun ip -> Ipaddr.V4 ip) (Ipaddr.V4.Set.elements ips) in
-      let dst, dsts = expand_list_split ips conn.ports in
-      Ok (Connecting (now, dst, dsts), [ Connect (host, id, dst) ])
-    | Connecting (started, _dst, dsts) when Int64.sub now started > t.connect_timeout->
+  match conn.state with
+  | Resolving when Int64.sub now conn.created > t.resolve_timeout ->
+    begin
+      let ok actions =
+        Ok ({ conn with created = now ; resolve_left = conn.resolve_left - 1 },
+            actions)
+      in
+      match conn.resolve_left <= 1, conn.resolved with
+      | true, _ | _, `both -> Error ()
+      | false, `none -> ok [ Resolve_a host ; Resolve_aaaa host ]
+      | false, `v4 -> ok [ Resolve_aaaa host ]
+      | false, `v6 -> ok [ Resolve_a host ]
+    end
+  | Waiting_for_aaaa (started, ips) when Int64.sub now started > t.aaaa_timeout ->
+    let ips = List.map (fun ip -> Ipaddr.V4 ip) (Ipaddr.V4.Set.elements ips) in
+    let dst, dsts = expand_list_split ips conn.ports in
+    let state = Connecting (now, dst, dsts) in
+    Ok ({ conn with state }, [ Connect (host, id, dst) ])
+  | Connecting (started, (ip, _), dsts) ->
+    (* if there are further IP addresses, and our connection attempt is to an
+       IPv6 address, use the v6_connect_timeout. Otherwise, use the
+       connect_timeout. *)
+    let timeout = match ip, dsts with
+      | Ipaddr.V6 _, _ :: _ -> t.v6_connect_timeout
+      | _, _ -> t.connect_timeout
+    in
+    if Int64.sub now started > timeout then
       (* TODO cancel previous connection attempt *)
       (match dsts with
-       | [] -> if conn.resolved = `both then Error () else Ok (Resolving, [])
-       | dst :: dsts -> Ok (Connecting (now, dst, dsts), [ Connect (host, id, dst) ]))
-    | x -> Ok (x, [])
-  with
-  | Ok (state, actions) -> Ok ({ conn with state }, actions)
-  | Error () -> Error ()
+       | [] ->
+         if conn.resolved = `both then
+           Error ()
+         else
+           Ok ({ conn with state = Resolving }, [])
+       | dst :: dsts ->
+         let state = Connecting (now, dst, dsts) in
+         Ok ({ conn with state }, [ Connect (host, id, dst) ]))
+    else
+      Ok (conn, [])
+  | _ -> Ok (conn, [])
 
 let timer t now =
-  Log.debug (fun m -> m "timer");
+  (* Log.debug (fun m -> m "timer"); *)
   let conns, actions =
     Domain_name.Host_map.fold (fun host v (dm, actions) ->
         let v, actions = IM.fold (fun id conn (acc, actions) ->
@@ -136,14 +166,21 @@ let timer t now =
         in
         dm, actions) t.conns (Domain_name.Host_map.empty, [])
   in
-  Log.debug (fun m -> m "timer %d actions" (List.length actions));
+  (* Log.debug (fun m -> m "timer %d actions" (List.length actions)); *)
   { t with conns },
   (if Domain_name.Host_map.is_empty conns then `Suspend else `Act),
   actions
 
 let connect t now ~id host ports =
+  Log.debug (fun m -> m "connect: id %d host %a" id Domain_name.pp host);
   if ports = [] then failwith "empty port list not supported";
-  let conn = { created = now ; ports ; state = Resolving ; resolved = `none } in
+  let conn = {
+    created = now ;
+    ports ;
+    state = Resolving ;
+    resolved = `none ;
+    resolve_left = t.resolve_retries
+  } in
   { t with conns = add_conn host id conn t.conns },
   [ Resolve_aaaa host ; Resolve_a host ]
 
@@ -202,12 +239,21 @@ let mix_dsts ?(ipv4 = Ipaddr.V4.Set.empty) ?(ipv6 = Ipaddr.V6.Set.empty) ports d
   shuffle ~first:(fst dst) (List.rev v4_dsts @ v4s) (List.rev v6_dsts @ v6s)
 
 let connect_ip t now ~id dsts =
+  Log.debug (fun m -> m "connect_ip id %d dsts %s"
+                id
+                (String.concat ", " (List.map Ipaddr.to_string (List.map fst dsts))));
   let dst, dsts = match dsts with
     | dst :: dsts -> dst, dsts
     | [] -> failwith "addresses are empty"
   in
   let state = Connecting (now, dst, dsts) in
-  let conn = { created = now ; ports = [] ; state ; resolved = `both } in
+  let conn = {
+    created = now ;
+    ports = [] ;
+    state ;
+    resolved = `both ;
+    resolve_left = 0 ;
+  } in
   let host = Domain_name.(host_exn (of_string_exn "host.invalid")) in
   { t with conns = add_conn host id conn t.conns },
   [ Connect (host, id, dst) ]
