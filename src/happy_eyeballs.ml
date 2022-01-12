@@ -152,7 +152,7 @@ let tick t now host id conn =
   | _ -> Ok (conn, [])
 
 let timer t now =
-  (* Log.debug (fun m -> m "timer"); *)
+  Log.debug (fun m -> m "timer");
   let conns, actions =
     Domain_name.Host_map.fold (fun host v (dm, actions) ->
         let v, actions = IM.fold (fun id conn (acc, actions) ->
@@ -166,7 +166,7 @@ let timer t now =
         in
         dm, actions) t.conns (Domain_name.Host_map.empty, [])
   in
-  (* Log.debug (fun m -> m "timer %d actions" (List.length actions)); *)
+  Log.debug (fun m -> m "timer %d actions" (List.length actions));
   { t with conns },
   (if Domain_name.Host_map.is_empty conns then `Suspend else `Act),
   actions
