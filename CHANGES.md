@@ -1,3 +1,13 @@
+## v0.1.3 (2022-01-12)
+
+* Happy_eyeballs.create: add v6_connect_timeout parameter - the amount of
+  nanoseconds (default: 200ms) after which to attempt IPv4 connection
+  establishment. (#21 @hannesm, review by @reynir, issue reported at
+  roburio/http-lwt-client#8 by @kit-ty-kate)
+* Happy_eyeballs.create: add resolve_retries - the amount of resolve attempts
+  when a (resolve) timeout occurs (default: 3). (#21 @hannesm, review by
+  @reynir, issue reported at roburio/http-lwt-client#8 by @kit-ty-kate)
+
 ## v0.1.2 (2021-12-17)
 
 * Happy_eyeballs_{lwt,mirage}: update to tcpip 7.0.0, remove mirage-stack
