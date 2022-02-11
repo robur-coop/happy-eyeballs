@@ -1,3 +1,24 @@
+module type S = sig
+  module Transport : Dns_client.S
+    with type io_addr = [ `Plaintext of Ipaddr.t * int  | `Tls of Tls.Config.client * Ipaddr.t * int ]
+     and type +'a io = 'a Lwt.t
+
+  type t
+  type dns
+  type flow
+
+  val create : ?happy_eyeballs:Happy_eyeballs.t ->
+    ?dns:dns -> ?timer_interval:int64 -> Transport.stack -> t
+
+  val connect_host : t -> [`host] Domain_name.t -> int list ->
+    ((Ipaddr.t * int) * flow, [> `Msg of string ]) result Lwt.t
+
+  val connect_ip : t -> (Ipaddr.t * int) list ->
+    ((Ipaddr.t * int) * flow, [> `Msg of string ]) result Lwt.t
+
+  val connect : t -> string -> int list ->
+    ((Ipaddr.t * int) * flow, [> `Msg of string ]) result Lwt.t
+end
 
 (* Lwt tasks are spawned:
  - create starts an asynchronous timer task
@@ -11,8 +32,19 @@
 let src = Logs.Src.create "happy-eyeballs.mirage" ~doc:"Happy Eyeballs Mirage"
 module Log = (val Logs.src_log src : Logs.LOG)
 
-module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) (P : Mirage_clock.PCLOCK) (S : Tcpip.Stack.V4V6) = struct
-  module DNS = Dns_client_mirage.Make(R)(T)(C)(P)(S)
+module Make (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) (S : Tcpip.Stack.V4V6)
+  (DNS : Dns_client_mirage.S with type Transport.stack = S.t) : sig
+  include S
+    with module Transport = DNS.Transport
+     and type dns = DNS.t
+     and type flow = S.TCP.flow
+
+  val connect_device : ?aaaa_timeout:int64 -> ?v6_connect_timeout:int64 ->
+    ?connect_timeout:int64 -> ?resolve_timeout:int64 -> ?resolve_retries:int ->
+    ?timer_interval:int64 -> int64 -> dns -> Transport.stack -> t Lwt.t
+end = struct
+  module Transport = DNS.Transport
+  type dns = DNS.t
 
   type t = {
     dns : DNS.t ;
@@ -22,6 +54,8 @@ module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) 
     timer_interval : int64 ;
     timer_condition : unit Lwt_condition.t ;
   }
+
+  type flow = S.TCP.flow
 
   let try_connect stack ip port =
     let open Lwt.Infix in
@@ -112,6 +146,10 @@ module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) 
   let handle_actions t actions =
     List.iter (fun a -> Lwt.async (fun () -> act t a)) actions
 
+  let open_msg_error = function
+    | Ok _ as r -> r
+    | Error (`Msg _) as r -> r
+
   let connect_host t host ports =
     let waiter, notify = Lwt.task () in
     let waiters, id = Happy_eyeballs.Waiter_map.register notify t.waiters in
@@ -127,7 +165,7 @@ module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) 
                   (match r with Ok _ -> "ok" | Error _ -> "failed")
                   Domain_name.pp host
                   Duration.pp (Int64.sub (C.elapsed_ns ()) ts));
-    r
+    open_msg_error r
 
   let connect_ip t addresses =
     let waiter, notify = Lwt.task () in
@@ -145,7 +183,7 @@ module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) 
                   Fmt.(list ~sep:(any ", ") (pair ~sep:(any ":") Ipaddr.pp int))
                   addresses
                   Duration.pp (Int64.sub (C.elapsed_ns ()) ts));
-    r
+    open_msg_error r
 
   let connect t host ports =
     match Ipaddr.of_string host with
@@ -155,4 +193,13 @@ module Make (R : Mirage_random.S) (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) 
       Lwt_result.lift
         (Result.bind (Domain_name.of_string host) Domain_name.host) >>= fun h ->
       connect_host t h ports
+
+  let connect_device ?aaaa_timeout ?v6_connect_timeout ?connect_timeout
+    ?resolve_timeout ?resolve_retries ?timer_interval ts dns stack =
+    let happy_eyeballs =
+      Happy_eyeballs.create ?aaaa_timeout ?v6_connect_timeout ?connect_timeout
+        ?resolve_timeout ?resolve_retries ts
+    in
+    let happy_eyeballs = create ~happy_eyeballs ~dns ?timer_interval stack in
+    Lwt.return happy_eyeballs
 end
