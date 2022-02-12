@@ -8,13 +8,13 @@ module type S = sig
     ?dns:DNS.t -> ?timer_interval:int64 -> DNS.Transport.stack -> t
 
   val connect_host : t -> [`host] Domain_name.t -> int list ->
-    ((Ipaddr.t * int) * flow, [ `Msg of string ]) result Lwt.t
+    ((Ipaddr.t * int) * flow, [> `Msg of string ]) result Lwt.t
 
   val connect_ip : t -> (Ipaddr.t * int) list ->
-    ((Ipaddr.t * int) * flow, [ `Msg of string ]) result Lwt.t
+    ((Ipaddr.t * int) * flow, [> `Msg of string ]) result Lwt.t
 
   val connect : t -> string -> int list ->
-    ((Ipaddr.t * int) * flow, [ `Msg of string ]) result Lwt.t
+    ((Ipaddr.t * int) * flow, [> `Msg of string ]) result Lwt.t
 
   val connect_device :
     ?aaaa_timeout:int64 ->
@@ -145,6 +145,10 @@ module Make (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) (S : Tcpip.Stack.V4V6)
   let handle_actions t actions =
     List.iter (fun a -> Lwt.async (fun () -> act t a)) actions
 
+  let open_msg_error : ('v, [ `Msg of string ]) result -> ('v, [> `Msg of string ]) result= function
+    | Ok _ as r -> r
+    | Error (`Msg _) as r -> r
+
   let connect_host t host ports =
     let waiter, notify = Lwt.task () in
     let waiters, id = Happy_eyeballs.Waiter_map.register notify t.waiters in
@@ -160,7 +164,7 @@ module Make (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) (S : Tcpip.Stack.V4V6)
                   (match r with Ok _ -> "ok" | Error _ -> "failed")
                   Domain_name.pp host
                   Duration.pp (Int64.sub (C.elapsed_ns ()) ts));
-    r
+    open_msg_error r
 
   let connect_ip t addresses =
     let waiter, notify = Lwt.task () in
@@ -178,7 +182,7 @@ module Make (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) (S : Tcpip.Stack.V4V6)
                   Fmt.(list ~sep:(any ", ") (pair ~sep:(any ":") Ipaddr.pp int))
                   addresses
                   Duration.pp (Int64.sub (C.elapsed_ns ()) ts));
-    r
+    open_msg_error r
 
   let connect t host ports =
     match Ipaddr.of_string host with

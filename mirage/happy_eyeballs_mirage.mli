@@ -8,13 +8,13 @@ module type S = sig
     ?dns:DNS.t -> ?timer_interval:int64 -> DNS.Transport.stack -> t
 
   val connect_host : t -> [`host] Domain_name.t -> int list ->
-    ((Ipaddr.t * int) * flow, [ `Msg of string ]) result Lwt.t
+    ((Ipaddr.t * int) * flow, [> `Msg of string ]) result Lwt.t
 
   val connect_ip : t -> (Ipaddr.t * int) list ->
-    ((Ipaddr.t * int) * flow, [ `Msg of string ]) result Lwt.t
+    ((Ipaddr.t * int) * flow, [> `Msg of string ]) result Lwt.t
 
   val connect : t -> string -> int list ->
-    ((Ipaddr.t * int) * flow, [ `Msg of string ]) result Lwt.t
+    ((Ipaddr.t * int) * flow, [> `Msg of string ]) result Lwt.t
 
   val connect_device :
     ?aaaa_timeout:int64 ->
