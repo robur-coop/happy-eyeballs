@@ -18,16 +18,6 @@ module type S = sig
 
   val connect : t -> string -> int list ->
     ((Ipaddr.t * int) * flow, [> `Msg of string ]) result Lwt.t
-
-  val connect_device :
-    ?aaaa_timeout:int64 ->
-    ?v6_connect_timeout:int64 ->
-    ?connect_timeout:int64 ->
-    ?resolve_timeout:int64 ->
-    ?resolve_retries:int ->
-    int64 ->
-    dns ->
-    ?timer_interval:int64 -> Transport.stack -> t Lwt.t
 end
 
 (* Lwt tasks are spawned:
@@ -44,9 +34,22 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 module Make (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) (S : Tcpip.Stack.V4V6)
   (DNS : Dns_client_mirage.S with type Transport.stack = S.t)
-  : S with module Transport = DNS.Transport
-       and type dns = DNS.t
-       and type flow = S.TCP.flow = struct
+  : sig
+  include S
+   with module Transport = DNS.Transport
+    and type dns = DNS.t
+    and type flow = S.TCP.flow
+
+  val connect_device :
+    ?aaaa_timeout:int64 ->
+    ?v6_connect_timeout:int64 ->
+    ?connect_timeout:int64 ->
+    ?resolve_timeout:int64 ->
+    ?resolve_retries:int ->
+    int64 ->
+    dns ->
+    ?timer_interval:int64 -> Transport.stack -> t Lwt.t
+end = struct
   module Transport = DNS.Transport
   type dns = DNS.t
 
