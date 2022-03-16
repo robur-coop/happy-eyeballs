@@ -1,3 +1,9 @@
+## v0.2.0 (2022-03-16)
+
+* Happy_eyeballs_mirage: add a module type signature to allow creation of
+  a MirageOS device (#22 @dinosaure)
+* happy-eyeballs-lwt: update to cmdliner 1.1.0 (@hannesm)
+
 ## v0.1.3 (2022-01-12)
 
 * Happy_eyeballs.create: add v6_connect_timeout parameter - the amount of
