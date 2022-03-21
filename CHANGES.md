@@ -1,3 +1,8 @@
+## v0.3.0 (2022-03-21)
+
+* Happy_eyeballs_mirage.connect_device: remove int64 argument (timestamp), use
+  monotonic clocks `C.elapsed_ns ()` instead (noticed by @dinosaure)
+
 ## v0.2.0 (2022-03-16)
 
 * Happy_eyeballs_mirage: add a module type signature to allow creation of

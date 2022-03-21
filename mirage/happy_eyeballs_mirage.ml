@@ -41,7 +41,7 @@ module Make (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) (S : Tcpip.Stack.V4V6)
 
   val connect_device : ?aaaa_timeout:int64 -> ?v6_connect_timeout:int64 ->
     ?connect_timeout:int64 -> ?resolve_timeout:int64 -> ?resolve_retries:int ->
-    ?timer_interval:int64 -> int64 -> dns -> Transport.stack -> t Lwt.t
+    ?timer_interval:int64 -> dns -> Transport.stack -> t Lwt.t
 end = struct
   module Transport = DNS.Transport
   type dns = DNS.t
@@ -195,10 +195,10 @@ end = struct
       connect_host t h ports
 
   let connect_device ?aaaa_timeout ?v6_connect_timeout ?connect_timeout
-    ?resolve_timeout ?resolve_retries ?timer_interval ts dns stack =
+    ?resolve_timeout ?resolve_retries ?timer_interval dns stack =
     let happy_eyeballs =
       Happy_eyeballs.create ?aaaa_timeout ?v6_connect_timeout ?connect_timeout
-        ?resolve_timeout ?resolve_retries ts
+        ?resolve_timeout ?resolve_retries (C.elapsed_ns ())
     in
     let happy_eyeballs = create ~happy_eyeballs ~dns ?timer_interval stack in
     Lwt.return happy_eyeballs
