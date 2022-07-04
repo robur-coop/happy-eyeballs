@@ -14,6 +14,14 @@ repository).
 
 It is licensed under the ISC license.
 
-Installation:
+### Installation
 
 `opam install happy-eyeballs happy-eyeballs-lwt happy-eyeballs-mirage`
+
+### Development
+
+Since dns-client depends on happy-eyeballs and happy-eyeballs-lwt,
+happy-eyeballs-mirage depend on dns-client, the dune build system is easily
+confused. A workaround is after a `git clone` of happy-eyeballs, do an `opam
+source dns-client`. Then dune will use the local dns-client package, and there
+will be no circularity issue.
