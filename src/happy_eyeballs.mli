@@ -36,11 +36,11 @@ val create : ?aaaa_timeout:int64 -> ?v6_connect_timeout:int64 ->
 
 val timer : t -> int64 -> t * [ `Suspend | `Act ] * action list
 (** [timer t ts] is a timer function that results in an updated [t] and either
-    [`Suspend] signalling that there are no pending connections and the timer
-    thread can suspend, or [`Act] that the timer should be called again after
-    sleeping. In addition, a list of actions that need to be performed
-    (connection to be retried, connection failures to be reported, ...) is
-    provided.
+    [`Suspend] signalling that there are no pending connection establishments
+    and the timer thread can suspend, or [`Act] that the timer should be called
+    again after sleeping. In addition, a list of actions that need to be
+    performed (connection establishment to be retried, connection failures to
+    be reported, ...) is provided.
     If the timer thread has been suspended it should be signalled to resume
     after calling [connect] or [connect_ip]. *)
 
