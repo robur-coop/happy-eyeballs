@@ -1,3 +1,8 @@
+## v0.3.1 (2022-11-21)
+
+* Improve documentation for `Happy_eyeballs.timer` (#24, #25 @reynir, review by @hannesm and @bikallem)
+* Demote log levels that are (likely) caused by missing cancellation (#26 @reynir)
+
 ## v0.3.0 (2022-03-21)
 
 * Happy_eyeballs_mirage.connect_device: remove int64 argument (timestamp), use
