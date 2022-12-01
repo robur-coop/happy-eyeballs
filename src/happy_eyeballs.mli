@@ -1,13 +1,16 @@
 (** The internal state of happy eyeballs. *)
 type t
 
+(** The type for a connection identifier. *)
+type id
+
 (** The variant of actions to be performed by the effectful layer. *)
 type action =
   | Resolve_a of [`host] Domain_name.t
   | Resolve_aaaa of [`host] Domain_name.t
-  | Connect of [`host] Domain_name.t * int * (Ipaddr.t * int)
-  | Connect_failed of [`host] Domain_name.t * int * string
-  | Connect_cancelled of [`host] Domain_name.t * int
+  | Connect of [`host] Domain_name.t * id * (Ipaddr.t * int)
+  | Connect_failed of [`host] Domain_name.t * id * string
+  | Connect_cancelled of [`host] Domain_name.t * id
 
 val pp_action : action Fmt.t
 (** [pp_action ppf a] pretty-prints the action [a] on [ppf]. *)
@@ -18,8 +21,8 @@ type event =
   | Resolved_aaaa of [`host] Domain_name.t * Ipaddr.V6.Set.t
   | Resolved_a_failed of [`host] Domain_name.t * string
   | Resolved_aaaa_failed of [`host] Domain_name.t * string
-  | Connection_failed of [`host] Domain_name.t * int * (Ipaddr.t * int) * string
-  | Connected of [`host] Domain_name.t * int * (Ipaddr.t * int)
+  | Connection_failed of [`host] Domain_name.t * id * (Ipaddr.t * int) * string
+  | Connected of [`host] Domain_name.t * id * (Ipaddr.t * int)
 
 val pp_event : event Fmt.t
 (** [pp_event ppf e] pretty-prints event [e] on [ppf]. *)
@@ -45,7 +48,7 @@ val timer : t -> int64 -> t * [ `Suspend | `Act ] * action list
     If the timer thread has been suspended it should be signalled to resume
     after calling [connect] or [connect_ip]. *)
 
-val connect : t -> int64 -> id:int -> [`host] Domain_name.t -> int list ->
+val connect : t -> int64 -> id:id -> [`host] Domain_name.t -> int list ->
   t * action list
 (** [connect t ts ~id host ports] attempts a connection to [host], where the
     [ports] are attempted in sequence. It results in an updated [t] and a list
@@ -53,7 +56,7 @@ val connect : t -> int64 -> id:int -> [`host] Domain_name.t -> int list ->
 
     @raise Failure if [ports] is the empty list. *)
 
-val connect_ip : t -> int64 -> id:int -> (Ipaddr.t * int) list ->
+val connect_ip : t -> int64 -> id:id -> (Ipaddr.t * int) list ->
   t * action list
 (** [connect_ip t ts ~id addresses] attempts a connection to [addresses]. By
     default, the list will be tried in sequence. The ports will be tried in
@@ -70,12 +73,12 @@ val event : t -> int64 -> event -> t * action list
 
 (** A map for waiters and internal id. *)
 module Waiter_map : sig
-  include Map.S with type key = Int.t
+  include Map.S with type key = id
 
-  val register : 'a -> 'a t -> 'a t * int
+  val register : 'a -> 'a t -> 'a t * id
   (** [register v t] registers [v] in [t], and returns the updated map and
       the key that was used. *)
 
-  val find_and_remove : int -> 'a t -> 'a t * 'a option
+  val find_and_remove : id -> 'a t -> 'a t * 'a option
   (** [find_and_remove id t] looks up [id] in [t], and removes [id] from [t]. *)
 end

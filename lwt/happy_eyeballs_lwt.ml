@@ -10,17 +10,9 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 let now = Mtime_clock.elapsed_ns
 
-module Name_id = Map.Make(struct
-    type t = [`host] Domain_name.t * int
-    let compare (h, id) (h', id') =
-      match Domain_name.compare h h' with
-      | 0 -> Int.compare id id'
-      | x -> x
-  end)
-
 type t = {
   mutable waiters : ((Ipaddr.t * int) * Lwt_unix.file_descr, [ `Msg of string ]) result Lwt.u Happy_eyeballs.Waiter_map.t ;
-  mutable connecting : (Lwt_unix.file_descr, [ `Msg of string ]) result Lwt.t Name_id.t;
+  mutable connecting : (Lwt_unix.file_descr, [ `Msg of string ]) result Lwt.t Happy_eyeballs.Waiter_map.t;
   mutable he : Happy_eyeballs.t ;
   dns : Dns_client_lwt.t ;
   timer_interval : float ;
@@ -75,9 +67,9 @@ let rec act t action =
     | Happy_eyeballs.Connect (host, id, (ip, port)) ->
       begin
         let th = try_connect ip port in
-        t.connecting <- Name_id.add (host, id) th t.connecting;
+        t.connecting <- Happy_eyeballs.Waiter_map.add id th t.connecting;
         th >>= fun r ->
-        t.connecting <- Name_id.remove (host, id) t.connecting;
+        t.connecting <- Happy_eyeballs.Waiter_map.remove id t.connecting;
         match r with
         | Ok fd ->
           let waiters, r = Happy_eyeballs.Waiter_map.find_and_remove id t.waiters in
@@ -94,9 +86,9 @@ let rec act t action =
         | Error `Msg msg ->
           Lwt.return (Ok (Happy_eyeballs.Connection_failed (host, id, (ip, port), msg)))
       end
-    | Happy_eyeballs.Connect_cancelled (host, id) ->
+    | Happy_eyeballs.Connect_cancelled (_host, id) ->
       begin
-        match Name_id.find_opt (host, id) t.connecting with
+        match Happy_eyeballs.Waiter_map.find_opt id t.connecting with
         | None -> ()
         | Some th -> Lwt.cancel th
       end;
@@ -140,8 +132,8 @@ let rec timer t =
 
 let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?(dns = Dns_client_lwt.create ()) ?(timer_interval = Duration.of_ms 10) () =
   let waiters = Happy_eyeballs.Waiter_map.empty
+  and connecting = Happy_eyeballs.Waiter_map.empty
   and timer_condition = Lwt_condition.create ()
-  and connecting = Name_id.empty
   in
   let timer_interval = Duration.to_f timer_interval in
   let t = { waiters ; connecting ; he = happy_eyeballs ; dns ; timer_interval ; timer_condition } in

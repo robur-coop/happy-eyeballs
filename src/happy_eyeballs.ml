@@ -33,12 +33,14 @@ type t = {
   conns : connection IM.t Domain_name.Host_map.t ;
 }
 
+type id = int
+
 type action =
   | Resolve_a of [`host] Domain_name.t
   | Resolve_aaaa of [`host] Domain_name.t
-  | Connect of [`host] Domain_name.t * int * (Ipaddr.t * int)
-  | Connect_failed of [`host] Domain_name.t * int * string
-  | Connect_cancelled of [`host] Domain_name.t * int
+  | Connect of [`host] Domain_name.t * id * (Ipaddr.t * int)
+  | Connect_failed of [`host] Domain_name.t * id * string
+  | Connect_cancelled of [`host] Domain_name.t * id
 
 let pp_action ppf = function
   | Resolve_a host -> Fmt.pf ppf "resolve A %a" Domain_name.pp host
@@ -56,8 +58,8 @@ type event =
   | Resolved_aaaa of [`host] Domain_name.t * Ipaddr.V6.Set.t
   | Resolved_a_failed of [`host] Domain_name.t * string
   | Resolved_aaaa_failed of [`host] Domain_name.t * string
-  | Connection_failed of [`host] Domain_name.t * int * (Ipaddr.t * int) * string
-  | Connected of [`host] Domain_name.t * int * (Ipaddr.t * int)
+  | Connection_failed of [`host] Domain_name.t * id * (Ipaddr.t * int) * string
+  | Connected of [`host] Domain_name.t * id * (Ipaddr.t * int)
 
 let pp_event ppf = function
   | Resolved_a (host, ips) ->
@@ -424,5 +426,4 @@ module Waiter_map = struct
     match find_opt id t with
     | None -> t, None
     | Some x -> remove id t, Some x
-
 end
