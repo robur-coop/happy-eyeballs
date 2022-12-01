@@ -27,8 +27,6 @@ end
    respective separate tasks
 *)
 
-(* TODO - cancellation of connection attempts *)
-
 let src = Logs.Src.create "happy-eyeballs.mirage" ~doc:"Happy Eyeballs Mirage"
 module Log = (val Logs.src_log src : Logs.LOG)
 
@@ -46,16 +44,25 @@ end = struct
   module Transport = DNS.Transport
   type dns = DNS.t
 
+  type flow = S.TCP.flow
+
+  module Name_id = Map.Make(struct
+    type t = [`host] Domain_name.t * int
+    let compare (h, id) (h', id') =
+      match Domain_name.compare h h' with
+      | 0 -> Int.compare id id'
+      | x -> x
+  end)
+
   type t = {
     dns : DNS.t ;
     stack : S.t ;
     mutable waiters : ((Ipaddr.t * int) * S.TCP.flow, [ `Msg of string ]) result Lwt.u Happy_eyeballs.Waiter_map.t ;
+    mutable connecting : (flow, [ `Msg of string ]) result Lwt.t Name_id.t;
     mutable he : Happy_eyeballs.t ;
     timer_interval : int64 ;
     timer_condition : unit Lwt_condition.t ;
   }
-
-  type flow = S.TCP.flow
 
   let try_connect stack ip port =
     let open Lwt.Infix in
@@ -72,17 +79,21 @@ end = struct
         begin
           DNS.getaddrinfo t.dns Dns.Rr_map.A host >|= function
           | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_a (host, res))
-          | Error _ -> Ok (Happy_eyeballs.Resolved_a_failed host)
+          | Error `Msg msg -> Ok (Happy_eyeballs.Resolved_a_failed (host, msg))
         end
       | Happy_eyeballs.Resolve_aaaa host ->
         begin
           DNS.getaddrinfo t.dns Dns.Rr_map.Aaaa host >|= function
           | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_aaaa (host, res))
-          | Error _ -> Ok (Happy_eyeballs.Resolved_aaaa_failed host)
+          | Error `Msg msg -> Ok (Happy_eyeballs.Resolved_aaaa_failed (host, msg))
         end
       | Happy_eyeballs.Connect (host, id, (ip, port)) ->
         begin
-          try_connect t.stack ip port >>= function
+          let th = try_connect t.stack ip port in
+          t.connecting <- Name_id.add (host, id) th t.connecting;
+          th >>= fun r ->
+          t.connecting <- Name_id.remove (host, id) t.connecting;
+          match r with
           | Ok flow ->
             let waiters, r = Happy_eyeballs.Waiter_map.find_and_remove id t.waiters in
             t.waiters <- waiters;
@@ -95,15 +106,21 @@ end = struct
                 S.TCP.close flow >>= fun () ->
                 Lwt.return (Error ())
             end
-          | Error _ ->
-            Lwt.return (Ok (Happy_eyeballs.Connection_failed (host, id, (ip, port))))
+          | Error `Msg msg ->
+            Lwt.return (Ok (Happy_eyeballs.Connection_failed (host, id, (ip, port), msg)))
         end
-      | Happy_eyeballs.Connect_failed (_host, id) ->
+      | Happy_eyeballs.Connect_cancelled (host, id) ->
+        begin match Name_id.find_opt (host, id) t.connecting with
+          | None -> ()
+          | Some th -> Lwt.cancel th
+        end;
+        Lwt.return (Error ())
+      | Happy_eyeballs.Connect_failed (_host, id, msg) ->
         let waiters, r = Happy_eyeballs.Waiter_map.find_and_remove id t.waiters in
         t.waiters <- waiters;
         begin match r with
           | Some waiter ->
-            Lwt.wakeup_later waiter (Error (`Msg "connection failed"));
+            Lwt.wakeup_later waiter (Error (`Msg ("connection failed: " ^ msg)));
             Lwt.return (Error ())
           | None ->
             (* waiter already vanished *)
@@ -138,8 +155,9 @@ end = struct
   let create ?(happy_eyeballs = Happy_eyeballs.create (C.elapsed_ns ())) ?dns ?(timer_interval = Duration.of_ms 10) stack =
     let dns = match dns with None -> DNS.create stack | Some x -> x
     and timer_condition = Lwt_condition.create ()
+    and connecting = Name_id.empty
     in
-    let t = { dns ; stack ; waiters = Happy_eyeballs.Waiter_map.empty ; he = happy_eyeballs ; timer_interval ; timer_condition } in
+    let t = { dns ; stack ; waiters = Happy_eyeballs.Waiter_map.empty ; connecting ; he = happy_eyeballs ; timer_interval ; timer_condition } in
     Lwt.async (fun () -> timer t);
     t
 

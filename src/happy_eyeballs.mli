@@ -6,7 +6,8 @@ type action =
   | Resolve_a of [`host] Domain_name.t
   | Resolve_aaaa of [`host] Domain_name.t
   | Connect of [`host] Domain_name.t * int * (Ipaddr.t * int)
-  | Connect_failed of [`host] Domain_name.t * int
+  | Connect_failed of [`host] Domain_name.t * int * string
+  | Connect_cancelled of [`host] Domain_name.t * int
 
 val pp_action : action Fmt.t
 (** [pp_action ppf a] pretty-prints the action [a] on [ppf]. *)
@@ -15,9 +16,9 @@ val pp_action : action Fmt.t
 type event =
   | Resolved_a of [`host] Domain_name.t * Ipaddr.V4.Set.t
   | Resolved_aaaa of [`host] Domain_name.t * Ipaddr.V6.Set.t
-  | Resolved_a_failed of [`host] Domain_name.t
-  | Resolved_aaaa_failed of [`host] Domain_name.t
-  | Connection_failed of [`host] Domain_name.t * int * (Ipaddr.t * int)
+  | Resolved_a_failed of [`host] Domain_name.t * string
+  | Resolved_aaaa_failed of [`host] Domain_name.t * string
+  | Connection_failed of [`host] Domain_name.t * int * (Ipaddr.t * int) * string
   | Connected of [`host] Domain_name.t * int * (Ipaddr.t * int)
 
 val pp_event : event Fmt.t
