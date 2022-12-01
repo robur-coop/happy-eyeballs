@@ -264,11 +264,7 @@ let event t now e =
   | Resolved_a (name, ips) ->
     let conns, actions =
       match Domain_name.Host_map.find name t.conns with
-      | None ->
-        (* XXX: DEBUG and not WARN because of missing cancellation logic *)
-        Log.debug (fun m -> m "resolved %a, but no entry in conns"
-                      Domain_name.pp name);
-        t.conns, []
+      | None -> t.conns, []
       | Some cs ->
         let cs, actions = IM.fold (fun id c (cs, actions) ->
             let resolved = resolve c.resolved `v4 in
@@ -298,11 +294,7 @@ let event t now e =
   | Resolved_a_failed name ->
     let conns, actions =
       match Domain_name.Host_map.find name t.conns with
-      | None ->
-        (* XXX: DEBUG and not WARN because of missing cancellation logic *)
-        Log.debug (fun m -> m "resolve A %a failed, but no entry in conns"
-                      Domain_name.pp name);
-        t.conns, []
+      | None -> t.conns, []
       | Some cs ->
         let cs, actions = IM.fold (fun id c (cs, actions) ->
             let resolved = resolve c.resolved `v4 in
@@ -321,11 +313,7 @@ let event t now e =
   | Resolved_aaaa (name, ips) ->
     let conns, actions =
       match Domain_name.Host_map.find name t.conns with
-      | None ->
-        (* XXX: DEBUG and not WARN because of missing cancellation logic *)
-        Log.debug (fun m -> m "resolved %a, but no entry in conns"
-                      Domain_name.pp name);
-        t.conns, []
+      | None -> t.conns, []
       | Some cs ->
         let cs, actions = IM.fold (fun id c (cs, actions) ->
             let resolved = resolve c.resolved `v6 in
@@ -351,11 +339,7 @@ let event t now e =
   | Resolved_aaaa_failed name ->
     let conns, actions =
       match Domain_name.Host_map.find name t.conns with
-      | None ->
-        (* XXX: DEBUG and not WARN because of missing cancellation logic *)
-        Log.debug (fun m -> m "resolve AAAA %a failed, but no entry in conns"
-                      Domain_name.pp name);
-        t.conns, []
+      | None -> t.conns, []
       | Some cs ->
         let cs, actions = IM.fold (fun id c (cs, actions) ->
             let resolved = resolve c.resolved `v6 in
