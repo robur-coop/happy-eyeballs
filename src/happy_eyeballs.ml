@@ -33,11 +33,14 @@ type t = {
   conns : connection IM.t Domain_name.Host_map.t ;
 }
 
+type id = int
+
 type action =
   | Resolve_a of [`host] Domain_name.t
   | Resolve_aaaa of [`host] Domain_name.t
-  | Connect of [`host] Domain_name.t * int * (Ipaddr.t * int)
-  | Connect_failed of [`host] Domain_name.t * int
+  | Connect of [`host] Domain_name.t * id * (Ipaddr.t * int)
+  | Connect_failed of [`host] Domain_name.t * id * string
+  | Connect_cancelled of [`host] Domain_name.t * id
 
 let pp_action ppf = function
   | Resolve_a host -> Fmt.pf ppf "resolve A %a" Domain_name.pp host
@@ -45,16 +48,18 @@ let pp_action ppf = function
   | Connect (host, id, (ip, port)) ->
     Fmt.pf ppf "%u connect %a (using %a:%u)" id Domain_name.pp host
       Ipaddr.pp ip port
-  | Connect_failed (host, id) ->
-    Fmt.pf ppf "%u connect failed %a" id Domain_name.pp host
+  | Connect_failed (host, id, reason) ->
+    Fmt.pf ppf "%u connect failed %a: %s" id Domain_name.pp host reason
+  | Connect_cancelled (host, id) ->
+    Fmt.pf ppf "%u connect cancelled %a" id Domain_name.pp host
 
 type event =
   | Resolved_a of [`host] Domain_name.t * Ipaddr.V4.Set.t
   | Resolved_aaaa of [`host] Domain_name.t * Ipaddr.V6.Set.t
-  | Resolved_a_failed of [`host] Domain_name.t
-  | Resolved_aaaa_failed of [`host] Domain_name.t
-  | Connection_failed of [`host] Domain_name.t * int * (Ipaddr.t * int)
-  | Connected of [`host] Domain_name.t * int * (Ipaddr.t * int)
+  | Resolved_a_failed of [`host] Domain_name.t * string
+  | Resolved_aaaa_failed of [`host] Domain_name.t * string
+  | Connection_failed of [`host] Domain_name.t * id * (Ipaddr.t * int) * string
+  | Connected of [`host] Domain_name.t * id * (Ipaddr.t * int)
 
 let pp_event ppf = function
   | Resolved_a (host, ips) ->
@@ -65,13 +70,13 @@ let pp_event ppf = function
     Fmt.pf ppf "resolved AAAA %a: %a" Domain_name.pp host
       Fmt.(list ~sep:(any ", ") Ipaddr.V6.pp)
       (Ipaddr.V6.Set.elements ips)
-  | Resolved_a_failed host ->
-    Fmt.pf ppf "resolve A failed for %a" Domain_name.pp host
-  | Resolved_aaaa_failed host ->
-    Fmt.pf ppf "resolve AAAA failed for %a" Domain_name.pp host
-  | Connection_failed (host, id, (ip, port)) ->
-    Fmt.pf ppf "%u connection to %a failed %a:%d" id Domain_name.pp host
-      Ipaddr.pp ip port
+  | Resolved_a_failed (host, reason) ->
+    Fmt.pf ppf "resolve A failed for %a: %s" Domain_name.pp host reason
+  | Resolved_aaaa_failed (host, reason) ->
+    Fmt.pf ppf "resolve AAAA failed for %a: %s" Domain_name.pp host reason
+  | Connection_failed (host, id, (ip, port), reason) ->
+    Fmt.pf ppf "%u connection to %a failed %a:%d: %s" id Domain_name.pp host
+      Ipaddr.pp ip port reason
   | Connected (host, id, (ip, port)) ->
     Fmt.pf ppf "%u connected to %a (using %a:%d)" id Domain_name.pp host
       Ipaddr.pp ip port
@@ -118,7 +123,7 @@ let tick t now host id conn =
             actions)
       in
       match conn.resolve_left <= 1, conn.resolved with
-      | true, _ | _, `both -> Error ()
+      | true, _ | _, `both -> Error []
       | false, `none -> ok [ Resolve_a host ; Resolve_aaaa host ]
       | false, `v4 -> ok [ Resolve_aaaa host ]
       | false, `v6 -> ok [ Resolve_a host ]
@@ -137,16 +142,16 @@ let tick t now host id conn =
       | _, _ -> t.connect_timeout
     in
     if Int64.sub now started > timeout then
-      (* TODO cancel previous connection attempt *)
+      let cancel = Connect_cancelled (host, id) in
       (match dsts with
        | [] ->
          if conn.resolved = `both then
-           Error ()
+           Error [cancel]
          else
-           Ok ({ conn with state = Resolving }, [])
+           Ok ({ conn with state = Resolving }, [cancel])
        | dst :: dsts ->
          let state = Connecting (now, dst, dsts) in
-         Ok ({ conn with state }, [ Connect (host, id, dst) ]))
+         Ok ({ conn with state }, [ cancel ; Connect (host, id, dst) ]))
     else
       Ok (conn, [])
   | _ -> Ok (conn, [])
@@ -158,7 +163,8 @@ let timer t now =
         let v, actions = IM.fold (fun id conn (acc, actions) ->
             match tick t now host id conn with
             | Ok (conn, action) -> IM.add id conn acc, actions @ action
-            | Error () -> acc, actions @ [ Connect_failed (host, id) ]
+            | Error action ->
+              acc, actions @ action @ [ Connect_failed (host, id, "timeout") ]
           ) v (IM.empty, actions)
         in
         let dm =
@@ -264,11 +270,7 @@ let event t now e =
   | Resolved_a (name, ips) ->
     let conns, actions =
       match Domain_name.Host_map.find name t.conns with
-      | None ->
-        (* XXX: DEBUG and not WARN because of missing cancellation logic *)
-        Log.debug (fun m -> m "resolved %a, but no entry in conns"
-                      Domain_name.pp name);
-        t.conns, []
+      | None -> t.conns, []
       | Some cs ->
         let cs, actions = IM.fold (fun id c (cs, actions) ->
             let resolved = resolve c.resolved `v4 in
@@ -295,20 +297,16 @@ let event t now e =
         Domain_name.Host_map.add name cs t.conns, actions
     in
     { t with conns }, actions
-  | Resolved_a_failed name ->
+  | Resolved_a_failed (name, reason) ->
     let conns, actions =
       match Domain_name.Host_map.find name t.conns with
-      | None ->
-        (* XXX: DEBUG and not WARN because of missing cancellation logic *)
-        Log.debug (fun m -> m "resolve A %a failed, but no entry in conns"
-                      Domain_name.pp name);
-        t.conns, []
+      | None -> t.conns, []
       | Some cs ->
         let cs, actions = IM.fold (fun id c (cs, actions) ->
             let resolved = resolve c.resolved `v4 in
             match c.state with
             | Resolving when resolved = `both ->
-              cs, Connect_failed (name, id) :: actions
+              cs, Connect_failed (name, id, reason) :: actions
             | _ -> IM.add id { c with resolved } cs, actions)
             cs (IM.empty, [])
         in
@@ -321,11 +319,7 @@ let event t now e =
   | Resolved_aaaa (name, ips) ->
     let conns, actions =
       match Domain_name.Host_map.find name t.conns with
-      | None ->
-        (* XXX: DEBUG and not WARN because of missing cancellation logic *)
-        Log.debug (fun m -> m "resolved %a, but no entry in conns"
-                      Domain_name.pp name);
-        t.conns, []
+      | None -> t.conns, []
       | Some cs ->
         let cs, actions = IM.fold (fun id c (cs, actions) ->
             let resolved = resolve c.resolved `v6 in
@@ -348,20 +342,16 @@ let event t now e =
         Domain_name.Host_map.add name cs t.conns, actions
     in
     { t with conns }, actions
-  | Resolved_aaaa_failed name ->
+  | Resolved_aaaa_failed (name, reason) ->
     let conns, actions =
       match Domain_name.Host_map.find name t.conns with
-      | None ->
-        (* XXX: DEBUG and not WARN because of missing cancellation logic *)
-        Log.debug (fun m -> m "resolve AAAA %a failed, but no entry in conns"
-                      Domain_name.pp name);
-        t.conns, []
+      | None -> t.conns, []
       | Some cs ->
         let cs, actions = IM.fold (fun id c (cs, actions) ->
             let resolved = resolve c.resolved `v6 in
             match c.state with
             | Resolving when resolved = `both ->
-              cs, Connect_failed (name, id) :: actions
+              cs, Connect_failed (name, id, reason) :: actions
             | Waiting_for_aaaa (_ts, ips) ->
               let ips =
                 List.map (fun ip -> Ipaddr.V4 ip) (Ipaddr.V4.Set.elements ips)
@@ -379,19 +369,18 @@ let event t now e =
            Domain_name.Host_map.add name cs t.conns), actions
     in
     { t with conns }, actions
-  | Connection_failed (name, id, (ip, port)) ->
+  | Connection_failed (name, id, (ip, port), reason) ->
     let conns, actions =
       match Domain_name.Host_map.find name t.conns with
       | None ->
-        (* XXX: DEBUG and not WARN because of missing cancellation logic *)
-        Log.debug (fun m -> m "connection failed to %a, but no entry in conns"
-                      Domain_name.pp name);
+        Log.warn (fun m -> m "connection failed to %a: %s; no entry in conns"
+                     Domain_name.pp name reason);
         t.conns, []
       | Some cs ->
         match IM.find_opt id cs with
         | None ->
-          Log.warn (fun m -> m "%u connection failed to %a, but no entry in IM"
-                       id Domain_name.pp name);
+          Log.warn (fun m -> m "%u connection failed to %a: %s; no entry in IM"
+                       id Domain_name.pp name reason);
           t.conns, []
         | Some c ->
           let is_dst (ip', port') = Ipaddr.compare ip ip' = 0 && port = port' in
@@ -399,7 +388,7 @@ let event t now e =
           | Connecting (_ts, dst, []) when is_dst dst && c.resolved = `both ->
             let cs = IM.remove id cs in
             Domain_name.Host_map.add name cs t.conns,
-            [ Connect_failed (name, id) ]
+            [ Connect_failed (name, id, reason) ]
           | Connecting (_ts, dst, []) when is_dst dst ->
             let state = Resolving in
             let cs = IM.add id { c with state } cs in
@@ -415,7 +404,10 @@ let event t now e =
   | Connected (name, id, (_ip, _port)) ->
     let conns =
       Domain_name.Host_map.update name (function
-          | None -> None
+          | None ->
+            Log.warn (fun m -> m "connected to an unexpected domain: %a"
+                         Domain_name.pp name);
+            None
           | Some xs ->
             let m = IM.remove id xs in
             if IM.cardinal m = 0 then None else Some m)
@@ -437,5 +429,4 @@ module Waiter_map = struct
     match find_opt id t with
     | None -> t, None
     | Some x -> remove id t, Some x
-
 end
