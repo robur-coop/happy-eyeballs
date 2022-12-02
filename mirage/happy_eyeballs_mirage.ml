@@ -50,7 +50,7 @@ end = struct
     dns : DNS.t ;
     stack : S.t ;
     mutable waiters : ((Ipaddr.t * int) * S.TCP.flow, [ `Msg of string ]) result Lwt.u Happy_eyeballs.Waiter_map.t ;
-    mutable connecting : (flow, [ `Msg of string ]) result Lwt.t Happy_eyeballs.Waiter_map.t;
+    mutable cancel_connecting : unit Lwt.u Happy_eyeballs.Waiter_map.t;
     mutable he : Happy_eyeballs.t ;
     timer_interval : int64 ;
     timer_condition : unit Lwt_condition.t ;
@@ -81,13 +81,13 @@ end = struct
         end
       | Happy_eyeballs.Connect (host, id, (ip, port)) ->
         begin
-          let th = try_connect t.stack ip port in
-          t.connecting <- Happy_eyeballs.Waiter_map.add id th t.connecting;
-          (Lwt.catch (fun () -> th)
-             (function
-               | Lwt.Canceled -> Lwt.return_error (`Msg "cancelled")
-               | e -> (* TODO: Lwt.reraise *) raise e)) >>= fun r ->
-          t.connecting <- Happy_eyeballs.Waiter_map.remove id t.connecting;
+          let cancelled, cancel = Lwt.task () in
+          t.cancel_connecting <- Happy_eyeballs.Waiter_map.add id cancel t.cancel_connecting;
+          Lwt.pick [
+            try_connect t.stack ip port ;
+            (cancelled >|= fun () -> Error (`Msg "cancelled"));
+          ] >>= fun r ->
+          t.cancel_connecting <- Happy_eyeballs.Waiter_map.remove id t.cancel_connecting;
           match r with
           | Ok flow ->
             let waiters, r = Happy_eyeballs.Waiter_map.find_and_remove id t.waiters in
@@ -105,9 +105,9 @@ end = struct
             Lwt.return (Ok (Happy_eyeballs.Connection_failed (host, id, (ip, port), msg)))
         end
       | Happy_eyeballs.Connect_cancelled (_host, id) ->
-        begin match Happy_eyeballs.Waiter_map.find_opt id t.connecting with
+        begin match Happy_eyeballs.Waiter_map.find_opt id t.cancel_connecting with
           | None -> ()
-          | Some th -> Lwt.cancel th
+          | Some th -> Lwt.wakeup_later th ()
         end;
         Lwt.return (Error ())
       | Happy_eyeballs.Connect_failed (_host, id, msg) ->
@@ -150,10 +150,10 @@ end = struct
   let create ?(happy_eyeballs = Happy_eyeballs.create (C.elapsed_ns ())) ?dns ?(timer_interval = Duration.of_ms 10) stack =
     let dns = match dns with None -> DNS.create stack | Some x -> x
     and waiters = Happy_eyeballs.Waiter_map.empty
-    and connecting = Happy_eyeballs.Waiter_map.empty
+    and cancel_connecting = Happy_eyeballs.Waiter_map.empty
     and timer_condition = Lwt_condition.create ()
     in
-    let t = { dns ; stack ; waiters ; connecting ; he = happy_eyeballs ; timer_interval ; timer_condition } in
+    let t = { dns ; stack ; waiters ; cancel_connecting ; he = happy_eyeballs ; timer_interval ; timer_condition } in
     Lwt.async (fun () -> timer t);
     t
 
