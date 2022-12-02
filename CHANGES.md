@@ -1,3 +1,13 @@
+## v0.4.0 (2022-12-02)
+
+* Cancellation of connection attempts (#30 @reynir @hannesm, fixes #27)
+* Make the type id abstract (suggested by @reynir in #30)
+* Add reason for failures to the variants, improves log output (#30, fixes #7, @hannesm @reynir)
+* Remove log messages about DNS resolution success/failure when there is no
+  awaiting connection (#30, @hannesm)
+* Use the domain name of the fist IP address in connect_ip as identifier (this
+  provides more useful information than the hardcoded "host.invalid") (#29, @hannesm)
+
 ## v0.3.1 (2022-11-21)
 
 * Improve documentation for `Happy_eyeballs.timer` (#24, #25 @reynir, review by @hannesm and @bikallem)
