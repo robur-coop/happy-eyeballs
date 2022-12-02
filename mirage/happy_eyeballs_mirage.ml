@@ -85,7 +85,7 @@ end = struct
           t.connecting <- Happy_eyeballs.Waiter_map.add id th t.connecting;
           (Lwt.catch (fun () -> th)
              (function
-               | Lwt.Canceled -> Error (`Msg "cancelled")
+               | Lwt.Canceled -> Lwt.return_error (`Msg "cancelled")
                | e -> (* TODO: Lwt.reraise *) raise e)) >>= fun r ->
           t.connecting <- Happy_eyeballs.Waiter_map.remove id t.connecting;
           match r with
