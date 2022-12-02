@@ -83,7 +83,10 @@ end = struct
         begin
           let th = try_connect t.stack ip port in
           t.connecting <- Happy_eyeballs.Waiter_map.add id th t.connecting;
-          th >>= fun r ->
+          (Lwt.catch (fun () -> th)
+             (function
+               | Lwt.Canceled -> Error (`Msg "cancelled")
+               | e -> (* TODO: Lwt.reraise *) raise e)) >>= fun r ->
           t.connecting <- Happy_eyeballs.Waiter_map.remove id t.connecting;
           match r with
           | Ok flow ->
