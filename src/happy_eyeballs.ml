@@ -404,7 +404,10 @@ let event t now e =
   | Connected (name, id, (_ip, _port)) ->
     let conns =
       Domain_name.Host_map.update name (function
-          | None -> None
+          | None ->
+            Log.warn (fun m -> m "connected to an unexpected domain: %a"
+                         Domain_name.pp name);
+            None
           | Some xs ->
             let m = IM.remove id xs in
             if IM.cardinal m = 0 then None else Some m)
