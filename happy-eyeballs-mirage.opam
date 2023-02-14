@@ -13,6 +13,7 @@ depends: [
   "happy-eyeballs" {=version}
   "duration"
   "dns-client" {>= "6.4.1"}
+  "dns-client-mirage"
   "domain-name"
   "ipaddr"
   "fmt"
