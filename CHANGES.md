@@ -1,3 +1,7 @@
+## v0.5.0 (2023-02-16)
+
+* Adapt to dns-client 7.0.0 packaging changes (#31 @dinosaure)
+
 ## v0.4.0 (2022-12-02)
 
 * Cancellation of connection attempts (#30 @reynir @hannesm, fixes #27)
