@@ -14,6 +14,7 @@ depends: [
   "cmdliner" {>= "1.1.0"}
   "duration"
   "dns-client" {>= "6.4.1"}
+  "dns-client-lwt"
   "domain-name"
   "ipaddr"
   "fmt"
