@@ -1,0 +1,21 @@
+freebsd_instance:
+  image_family: freebsd-12-2
+
+freebsd_task:
+  env:
+    matrix:
+      - OCAML_VERSION: 4.13.1
+      - OCAML_VERSION: 4.14.1
+
+  pkg_install_script: pkg install -y ocaml-opam gmp gmake pkgconf bash
+
+  ocaml_script:
+    - opam init -a --comp=$OCAML_VERSION
+    - opam env
+
+  pin_packages_script:
+    - opam install -y --deps-only -t .
+    - opam source dns-client
+
+  build_script:
+    - opam exec -- dune build -p happy-eyeballs,happy-eyeballs-lwt,happy-eyeballs-mirage,dns,dns-client,dns-client-lwt,dns-client-mirage
