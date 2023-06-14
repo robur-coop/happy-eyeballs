@@ -48,10 +48,19 @@ let pp_action ppf = function
   | Resolve_a host -> Fmt.pf ppf "resolve A %a" Domain_name.pp host
   | Resolve_aaaa host -> Fmt.pf ppf "resolve AAAA %a" Domain_name.pp host
   | Connect (host, id, id', (ip, port)) ->
-    Fmt.pf ppf "%u connect %a (using %a:%u), attempt %u" id Domain_name.pp host
-      Ipaddr.pp ip port id'
+    (match Ipaddr.of_domain_name host with
+     | None ->
+       Fmt.pf ppf "%u connect %a (using %a:%u), attempt %u" id Domain_name.pp
+         host Ipaddr.pp ip port id'
+     | Some ip' ->
+       Fmt.pf ppf "%u connect to IP %a (using %a:%u), attempt %u" id Ipaddr.pp
+         ip' Ipaddr.pp ip port id')
   | Connect_failed (host, id, reason) ->
-    Fmt.pf ppf "%u connect failed %a: %s" id Domain_name.pp host reason
+    (match Ipaddr.of_domain_name host with
+     | None ->
+       Fmt.pf ppf "%u connect failed %a: %s" id Domain_name.pp host reason
+     | Some ip ->
+       Fmt.pf ppf "%u connect failed to IP %a: %s" id Ipaddr.pp ip reason)
 
 type event =
   | Resolved_a of [`host] Domain_name.t * Ipaddr.V4.Set.t
@@ -75,11 +84,21 @@ let pp_event ppf = function
   | Resolved_aaaa_failed (host, reason) ->
     Fmt.pf ppf "resolve AAAA failed for %a: %s" Domain_name.pp host reason
   | Connection_failed (host, id, (ip, port), reason) ->
-    Fmt.pf ppf "%u connection to %a failed %a:%d: %s" id Domain_name.pp host
-      Ipaddr.pp ip port reason
+    (match Ipaddr.of_domain_name host with
+     | None ->
+       Fmt.pf ppf "%u connection to %a failed %a:%d: %s" id Domain_name.pp host
+         Ipaddr.pp ip port reason
+     | Some ip' ->
+       Fmt.pf ppf "%u connection to IP %a failed %a:%d: %s" id Ipaddr.pp ip'
+         Ipaddr.pp ip port reason)
   | Connected (host, id, (ip, port)) ->
-    Fmt.pf ppf "%u connected to %a (using %a:%d)" id Domain_name.pp host
-      Ipaddr.pp ip port
+    (match Ipaddr.of_domain_name host with
+     | None ->
+       Fmt.pf ppf "%u connected to %a (using %a:%d)" id Domain_name.pp host
+         Ipaddr.pp ip port
+     | Some ip' ->
+       Fmt.pf ppf "%u connected to IP %a (using %a:%d)" id Ipaddr.pp ip'
+         Ipaddr.pp ip port)
 
 let create
     ?(aaaa_timeout = Duration.of_ms 50)
