@@ -27,7 +27,7 @@ module Make (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) (S : Tcpip.Stack.V4V6)
     and type dns = DNS.t
     and type flow = S.TCP.flow
 
-  val connect_device : ?aaaa_timeout:int64 -> ?v6_connect_timeout:int64 ->
+  val connect_device : ?aaaa_timeout:int64 -> ?connect_delay:int64 ->
     ?connect_timeout:int64 -> ?resolve_timeout:int64 -> ?resolve_retries:int ->
     ?timer_interval:int64 -> dns -> Transport.stack -> t Lwt.t
 end

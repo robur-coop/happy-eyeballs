@@ -8,9 +8,8 @@ type id
 type action =
   | Resolve_a of [`host] Domain_name.t
   | Resolve_aaaa of [`host] Domain_name.t
-  | Connect of [`host] Domain_name.t * id * (Ipaddr.t * int)
+  | Connect of [`host] Domain_name.t * id * int * (Ipaddr.t * int)
   | Connect_failed of [`host] Domain_name.t * id * string
-  | Connect_cancelled of [`host] Domain_name.t * id
 
 val pp_action : action Fmt.t
 (** [pp_action ppf a] pretty-prints the action [a] on [ppf]. *)
@@ -27,14 +26,14 @@ type event =
 val pp_event : event Fmt.t
 (** [pp_event ppf e] pretty-prints event [e] on [ppf]. *)
 
-val create : ?aaaa_timeout:int64 -> ?v6_connect_timeout:int64 ->
+val create : ?aaaa_timeout:int64 -> ?connect_delay:int64 ->
   ?connect_timeout:int64 -> ?resolve_timeout:int64 -> ?resolve_retries:int ->
   int64 -> t
-(** [create ~aaaa_timeout ~v6_connect_timeout ~connect_timeout ~resolve_timeout ~resolve_retries ts]
+(** [create ~aaaa_timeout ~connect_delay ~connect_timeout ~resolve_timeout ~resolve_retries ts]
     creates the internal state, initialized with the timestamp [ts] (an
     arbitrary number that must be monotonically increasing). The timeouts are
     specified in nanoseconds: the default of [aaaa_timeout] is
-    [Duration.of_ms 50], [v6_connect_timeout] is [Duration.of_ms 200],
+    [Duration.of_ms 50], [connect_delay] is [Duration.of_ms 50],
     [connect_timeout] is [Duration.of_sec 10], and [resolve_timeout] is
     [Duration.of_sec 1]. The [resolve_retries] defaults to 3. *)
 
@@ -70,6 +69,9 @@ val event : t -> int64 -> event -> t * action list
     performed.
 
     @raise Failure if [ev] contains an empty set of IP addresses. *)
+
+val resolve_timeout : t -> int64
+(** [resolve_timeout t] is the timeout for the resolver in nanoseconds. *)
 
 (** A map for waiters and internal id. *)
 module Waiter_map : sig
