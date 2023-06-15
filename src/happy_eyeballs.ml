@@ -52,9 +52,9 @@ let host_or_ip v =
 let pp_action ppf = function
   | Resolve_a host -> Fmt.pf ppf "resolve A %a" Domain_name.pp host
   | Resolve_aaaa host -> Fmt.pf ppf "resolve AAAA %a" Domain_name.pp host
-  | Connect (host, id, id', (ip, port)) ->
+  | Connect (host, id, attempt, (ip, port)) ->
     Fmt.pf ppf "%u connect %s (using %a:%u), attempt %u" id (host_or_ip host)
-         Ipaddr.pp ip port id'
+         Ipaddr.pp ip port attempt
   | Connect_failed (host, id, reason) ->
     Fmt.pf ppf "%u connect failed %s: %s" id (host_or_ip host) reason
 
@@ -171,7 +171,6 @@ let timer t now =
         in
         dm, actions) t.conns (Domain_name.Host_map.empty, [])
   in
-  let actions = List.rev actions in
   (match actions with
    | [] when not (Domain_name.Host_map.is_empty conns) -> ()
    | _ ->

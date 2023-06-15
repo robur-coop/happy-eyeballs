@@ -38,7 +38,7 @@ module Make (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) (S : Tcpip.Stack.V4V6)
      and type flow = S.TCP.flow
 
   val connect_device : ?aaaa_timeout:int64 -> ?connect_delay:int64 ->
-    ?connect_timeout:int64 -> ?resolve_timeout:int64 -> ?resolve_retries:int ->
+    ?v6_connect_timeout:int64 -> ?connect_timeout:int64 -> ?resolve_timeout:int64 -> ?resolve_retries:int ->
     ?timer_interval:int64 -> dns -> Transport.stack -> t Lwt.t
 end = struct
   module Transport = DNS.Transport
@@ -88,13 +88,14 @@ end = struct
               (function None -> Some [ entry ] | Some c -> Some (entry :: c))
               t.cancel_connecting;
           let conn =
-            try_connect t.stack addr >>= function
+            try_connect t.stack addr >|= function
             | Ok flow ->
               let cancel_connecting, others =
                 Happy_eyeballs.Waiter_map.find_and_remove id t.cancel_connecting
               in
               t.cancel_connecting <- cancel_connecting;
-              List.iter (fun (_, u) -> Lwt.wakeup_later u ()) (Option.value ~default:[] others);
+              List.iter (fun (att, u) -> if att <> attempt then Lwt.wakeup_later u ()) 
+                (Option.value ~default:[] others);
               let waiters, r = Happy_eyeballs.Waiter_map.find_and_remove id t.waiters in
               t.waiters <- waiters;
               begin match r with
@@ -232,7 +233,7 @@ end = struct
         (Result.bind (Domain_name.of_string host) Domain_name.host) >>= fun h ->
       connect_host t h ports
 
-  let connect_device ?aaaa_timeout ?connect_delay ?connect_timeout
+  let connect_device ?aaaa_timeout ?connect_delay ?v6_connect_timeout:_ ?connect_timeout
     ?resolve_timeout ?resolve_retries ?timer_interval dns stack =
     let happy_eyeballs =
       Happy_eyeballs.create ?aaaa_timeout ?connect_delay ?connect_timeout
