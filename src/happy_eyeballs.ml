@@ -44,23 +44,19 @@ type action =
   | Connect of [`host] Domain_name.t * id * int * (Ipaddr.t * int)
   | Connect_failed of [`host] Domain_name.t * id * string
 
+let host_or_ip v =
+  match Ipaddr.of_domain_name v with
+  | None -> Domain_name.to_string v
+  | Some ip -> Ipaddr.to_string ip
+
 let pp_action ppf = function
   | Resolve_a host -> Fmt.pf ppf "resolve A %a" Domain_name.pp host
   | Resolve_aaaa host -> Fmt.pf ppf "resolve AAAA %a" Domain_name.pp host
   | Connect (host, id, id', (ip, port)) ->
-    (match Ipaddr.of_domain_name host with
-     | None ->
-       Fmt.pf ppf "%u connect %a (using %a:%u), attempt %u" id Domain_name.pp
-         host Ipaddr.pp ip port id'
-     | Some ip' ->
-       Fmt.pf ppf "%u connect to IP %a (using %a:%u), attempt %u" id Ipaddr.pp
-         ip' Ipaddr.pp ip port id')
+    Fmt.pf ppf "%u connect %s (using %a:%u), attempt %u" id (host_or_ip host)
+         Ipaddr.pp ip port id'
   | Connect_failed (host, id, reason) ->
-    (match Ipaddr.of_domain_name host with
-     | None ->
-       Fmt.pf ppf "%u connect failed %a: %s" id Domain_name.pp host reason
-     | Some ip ->
-       Fmt.pf ppf "%u connect failed to IP %a: %s" id Ipaddr.pp ip reason)
+    Fmt.pf ppf "%u connect failed %s: %s" id (host_or_ip host) reason
 
 type event =
   | Resolved_a of [`host] Domain_name.t * Ipaddr.V4.Set.t
@@ -84,21 +80,11 @@ let pp_event ppf = function
   | Resolved_aaaa_failed (host, reason) ->
     Fmt.pf ppf "resolve AAAA failed for %a: %s" Domain_name.pp host reason
   | Connection_failed (host, id, (ip, port), reason) ->
-    (match Ipaddr.of_domain_name host with
-     | None ->
-       Fmt.pf ppf "%u connection to %a failed %a:%d: %s" id Domain_name.pp host
-         Ipaddr.pp ip port reason
-     | Some ip' ->
-       Fmt.pf ppf "%u connection to IP %a failed %a:%d: %s" id Ipaddr.pp ip'
-         Ipaddr.pp ip port reason)
+    Fmt.pf ppf "%u connection to %s failed %a:%d: %s" id (host_or_ip host)
+      Ipaddr.pp ip port reason
   | Connected (host, id, (ip, port)) ->
-    (match Ipaddr.of_domain_name host with
-     | None ->
-       Fmt.pf ppf "%u connected to %a (using %a:%d)" id Domain_name.pp host
-         Ipaddr.pp ip port
-     | Some ip' ->
-       Fmt.pf ppf "%u connected to IP %a (using %a:%d)" id Ipaddr.pp ip'
-         Ipaddr.pp ip port)
+    Fmt.pf ppf "%u connected to %s (using %a:%d)" id (host_or_ip host)
+      Ipaddr.pp ip port
 
 let create
     ?(aaaa_timeout = Duration.of_ms 50)
@@ -172,7 +158,6 @@ let tick t now host id conn =
   | _ -> Ok (conn, [])
 
 let timer t now =
-  Log.debug (fun m -> m "timer");
   let conns, actions =
     Domain_name.Host_map.fold (fun host v (dm, actions) ->
         let v, actions = IM.fold (fun id conn (acc, actions) ->
@@ -186,11 +171,17 @@ let timer t now =
         in
         dm, actions) t.conns (Domain_name.Host_map.empty, [])
   in
-  Log.debug (fun m -> m "timer %d actions: %a" (List.length actions)
-                Fmt.(list ~sep:(any "@.") pp_action) actions);
+  let actions = List.rev actions in
+  (match actions with
+   | [] when not (Domain_name.Host_map.is_empty conns) -> ()
+   | _ ->
+     Log.debug (fun m -> m "timer continue %B, %d actions: %a"
+                   (not (Domain_name.Host_map.is_empty conns))
+                   (List.length actions)
+                   Fmt.(list ~sep:(any "@.") pp_action) actions));
   { t with conns },
   (if Domain_name.Host_map.is_empty conns then `Suspend else `Act),
-  List.rev actions
+  actions
 
 let connect t now ~id host ports =
   Log.debug (fun m -> m "connect: id %d host %a" id Domain_name.pp host);
@@ -401,14 +392,14 @@ let event t now e =
       let conns, actions =
         match Domain_name.Host_map.find name t.conns with
         | None ->
-          Log.warn (fun m -> m "connection failed to %a: %s; no entry in conns"
-                       Domain_name.pp name reason);
+          Log.warn (fun m -> m "connection failed to %s: %s; no entry in conns"
+                       (host_or_ip name) reason);
           t.conns, []
         | Some cs ->
           match IM.find_opt id cs with
           | None ->
-            Log.warn (fun m -> m "%u connection failed to %a: %s; no entry in IM"
-                         id Domain_name.pp name reason);
+            Log.warn (fun m -> m "%u connection failed to %s: %s; no entry in IM"
+                         id (host_or_ip name) reason);
             t.conns, []
           | Some c ->
             let not_failed (ip', port') = not (Ipaddr.compare ip ip' = 0 && port = port') in
