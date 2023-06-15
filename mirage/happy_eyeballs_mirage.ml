@@ -118,7 +118,7 @@ end = struct
           in
           Lwt.pick [ conn ; (cancelled >|= fun () -> Error ()); ]
         end
-      | Happy_eyeballs.Connect_failed (_host, id, msg) ->
+      | Happy_eyeballs.Connect_failed (host, id, msg) ->
         let cancel_connecting, others =
           Happy_eyeballs.Waiter_map.find_and_remove id t.cancel_connecting
         in
@@ -128,7 +128,14 @@ end = struct
         t.waiters <- waiters;
         begin match r with
           | Some waiter ->
-            Lwt.wakeup_later waiter (Error (`Msg ("connection failed: " ^ msg)));
+            let err =
+              Fmt.str "connection to %s failed: %s"
+                (match Ipaddr.of_domain_name host with
+                 | None -> Domain_name.to_string host
+                 | Some ip -> Ipaddr.to_string ip)
+                msg
+            in
+            Lwt.wakeup_later waiter (Error (`Msg err));
             Lwt.return (Error ())
           | None ->
             (* waiter already vanished *)
