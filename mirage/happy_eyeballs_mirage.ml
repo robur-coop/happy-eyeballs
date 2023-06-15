@@ -37,6 +37,7 @@ module Make (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) (S : Tcpip.Stack.V4V6)
      and type dns = DNS.t
      and type flow = S.TCP.flow
 
+  (* note: the v6_connect_timeout is kept until 1.0.0 since it is referenced in mirage *)
   val connect_device : ?aaaa_timeout:int64 -> ?connect_delay:int64 ->
     ?v6_connect_timeout:int64 -> ?connect_timeout:int64 -> ?resolve_timeout:int64 -> ?resolve_retries:int ->
     ?timer_interval:int64 -> dns -> Transport.stack -> t Lwt.t
@@ -233,6 +234,7 @@ end = struct
         (Result.bind (Domain_name.of_string host) Domain_name.host) >>= fun h ->
       connect_host t h ports
 
+  (* note: the v6_connect_timeout is kept until 1.0.0 since it is referenced in mirage *)
   let connect_device ?aaaa_timeout ?connect_delay ?v6_connect_timeout:_ ?connect_timeout
     ?resolve_timeout ?resolve_retries ?timer_interval dns stack =
     let happy_eyeballs =
