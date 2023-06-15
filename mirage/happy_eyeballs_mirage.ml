@@ -37,8 +37,9 @@ module Make (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) (S : Tcpip.Stack.V4V6)
      and type dns = DNS.t
      and type flow = S.TCP.flow
 
-  val connect_device : ?aaaa_timeout:int64 -> ?v6_connect_timeout:int64 ->
-    ?connect_timeout:int64 -> ?resolve_timeout:int64 -> ?resolve_retries:int ->
+  (* note: the v6_connect_timeout is kept until 1.0.0 since it is referenced in mirage *)
+  val connect_device : ?aaaa_timeout:int64 -> ?connect_delay:int64 ->
+    ?v6_connect_timeout:int64 -> ?connect_timeout:int64 -> ?resolve_timeout:int64 -> ?resolve_retries:int ->
     ?timer_interval:int64 -> dns -> Transport.stack -> t Lwt.t
 end = struct
   module Transport = DNS.Transport
@@ -50,15 +51,15 @@ end = struct
     dns : DNS.t ;
     stack : S.t ;
     mutable waiters : ((Ipaddr.t * int) * S.TCP.flow, [ `Msg of string ]) result Lwt.u Happy_eyeballs.Waiter_map.t ;
-    mutable cancel_connecting : unit Lwt.u Happy_eyeballs.Waiter_map.t;
+    mutable cancel_connecting : (int * unit Lwt.u) list Happy_eyeballs.Waiter_map.t;
     mutable he : Happy_eyeballs.t ;
     timer_interval : int64 ;
     timer_condition : unit Lwt_condition.t ;
   }
 
-  let try_connect stack ip port =
+  let try_connect stack addr =
     let open Lwt.Infix in
-    S.TCP.create_connection (S.tcp stack) (ip, port) >|= fun r ->
+    S.TCP.create_connection (S.tcp stack) addr >|= fun r ->
     Result.map_error
       (fun err -> `Msg (Fmt.to_to_string S.TCP.pp_error err)) r
 
@@ -79,43 +80,64 @@ end = struct
           | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_aaaa (host, res))
           | Error `Msg msg -> Ok (Happy_eyeballs.Resolved_aaaa_failed (host, msg))
         end
-      | Happy_eyeballs.Connect (host, id, (ip, port)) ->
+      | Happy_eyeballs.Connect (host, id, attempt, addr) ->
         begin
           let cancelled, cancel = Lwt.task () in
-          t.cancel_connecting <- Happy_eyeballs.Waiter_map.add id cancel t.cancel_connecting;
-          Lwt.pick [
-            try_connect t.stack ip port ;
-            (cancelled >|= fun () -> Error (`Msg "cancelled"));
-          ] >>= fun r ->
-          t.cancel_connecting <- Happy_eyeballs.Waiter_map.remove id t.cancel_connecting;
-          match r with
-          | Ok flow ->
-            let waiters, r = Happy_eyeballs.Waiter_map.find_and_remove id t.waiters in
-            t.waiters <- waiters;
-            begin match r with
-              | Some waiter ->
-                Lwt.wakeup_later waiter (Ok ((ip, port), flow));
-                Lwt.return (Ok (Happy_eyeballs.Connected (host, id, (ip, port))))
-              | None ->
-                (* waiter already vanished *)
-                S.TCP.close flow >>= fun () ->
-                Lwt.return (Error ())
-            end
-          | Error `Msg msg ->
-            Lwt.return (Ok (Happy_eyeballs.Connection_failed (host, id, (ip, port), msg)))
+          let entry = attempt, cancel in
+          t.cancel_connecting <-
+            Happy_eyeballs.Waiter_map.update id
+              (function None -> Some [ entry ] | Some c -> Some (entry :: c))
+              t.cancel_connecting;
+          let conn =
+            try_connect t.stack addr >>= function
+            | Ok flow ->
+              let cancel_connecting, others =
+                Happy_eyeballs.Waiter_map.find_and_remove id t.cancel_connecting
+              in
+              t.cancel_connecting <- cancel_connecting;
+              List.iter (fun (att, u) -> if att <> attempt then Lwt.wakeup_later u ())
+                (Option.value ~default:[] others);
+              let waiters, r = Happy_eyeballs.Waiter_map.find_and_remove id t.waiters in
+              t.waiters <- waiters;
+              begin match r with
+                | Some waiter ->
+                  Lwt.wakeup_later waiter (Ok (addr, flow));
+                  Lwt.return (Ok (Happy_eyeballs.Connected (host, id, addr)))
+                | None ->
+                  (* waiter already vanished *)
+                  S.TCP.close flow >>= fun () ->
+                  Lwt.return (Error ())
+              end
+            | Error `Msg msg ->
+              t.cancel_connecting <-
+                Happy_eyeballs.Waiter_map.update id
+                  (function None -> None | Some c ->
+                    match List.filter (fun (att, _) -> not (att = attempt)) c with
+                    | [] -> None
+                    | c -> Some c)
+                  t.cancel_connecting;
+              Lwt.return (Ok (Happy_eyeballs.Connection_failed (host, id, addr, msg)))
+          in
+          Lwt.pick [ conn ; (cancelled >|= fun () -> Error ()); ]
         end
-      | Happy_eyeballs.Connect_cancelled (_host, id) ->
-        begin match Happy_eyeballs.Waiter_map.find_opt id t.cancel_connecting with
-          | None -> ()
-          | Some th -> Lwt.wakeup_later th ()
-        end;
-        Lwt.return (Error ())
-      | Happy_eyeballs.Connect_failed (_host, id, msg) ->
+      | Happy_eyeballs.Connect_failed (host, id, msg) ->
+        let cancel_connecting, others =
+          Happy_eyeballs.Waiter_map.find_and_remove id t.cancel_connecting
+        in
+        t.cancel_connecting <- cancel_connecting;
+        List.iter (fun (_, u) -> Lwt.wakeup_later u ()) (Option.value ~default:[] others);
         let waiters, r = Happy_eyeballs.Waiter_map.find_and_remove id t.waiters in
         t.waiters <- waiters;
         begin match r with
           | Some waiter ->
-            Lwt.wakeup_later waiter (Error (`Msg ("connection failed: " ^ msg)));
+            let err =
+              Fmt.str "connection to %s failed: %s"
+                (match Ipaddr.of_domain_name host with
+                 | None -> Domain_name.to_string host
+                 | Some ip -> Ipaddr.to_string ip)
+                msg
+            in
+            Lwt.wakeup_later waiter (Error (`Msg err));
             Lwt.return (Error ())
           | None ->
             (* waiter already vanished *)
@@ -148,7 +170,11 @@ end = struct
     loop ()
 
   let create ?(happy_eyeballs = Happy_eyeballs.create (C.elapsed_ns ())) ?dns ?(timer_interval = Duration.of_ms 10) stack =
-    let dns = match dns with None -> DNS.create stack | Some x -> x
+    let dns =
+      Option.value ~default:
+        (let timeout = Happy_eyeballs.resolve_timeout happy_eyeballs in
+         DNS.create ~timeout stack)
+        dns
     and waiters = Happy_eyeballs.Waiter_map.empty
     and cancel_connecting = Happy_eyeballs.Waiter_map.empty
     and timer_condition = Lwt_condition.create ()
@@ -208,10 +234,11 @@ end = struct
         (Result.bind (Domain_name.of_string host) Domain_name.host) >>= fun h ->
       connect_host t h ports
 
-  let connect_device ?aaaa_timeout ?v6_connect_timeout ?connect_timeout
+  (* note: the v6_connect_timeout is kept until 1.0.0 since it is referenced in mirage *)
+  let connect_device ?aaaa_timeout ?connect_delay ?v6_connect_timeout:_ ?connect_timeout
     ?resolve_timeout ?resolve_retries ?timer_interval dns stack =
     let happy_eyeballs =
-      Happy_eyeballs.create ?aaaa_timeout ?v6_connect_timeout ?connect_timeout
+      Happy_eyeballs.create ?aaaa_timeout ?connect_delay ?connect_timeout
         ?resolve_timeout ?resolve_retries (C.elapsed_ns ())
     in
     let happy_eyeballs = create ~happy_eyeballs ~dns ?timer_interval stack in

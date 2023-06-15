@@ -12,7 +12,7 @@ let now = Mtime_clock.elapsed_ns
 
 type t = {
   mutable waiters : ((Ipaddr.t * int) * Lwt_unix.file_descr, [ `Msg of string ]) result Lwt.u Happy_eyeballs.Waiter_map.t ;
-  mutable cancel_connecting : unit Lwt.u Happy_eyeballs.Waiter_map.t;
+  mutable cancel_connecting : (int * unit Lwt.u) list Happy_eyeballs.Waiter_map.t;
   mutable he : Happy_eyeballs.t ;
   dns : Dns_client_lwt.t ;
   timer_interval : float ;
@@ -60,44 +60,64 @@ let rec act t action =
         | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_aaaa (host, res))
         | Error `Msg msg -> Ok (Happy_eyeballs.Resolved_aaaa_failed (host, msg))
       end
-    | Happy_eyeballs.Connect (host, id, (ip, port)) ->
+    | Happy_eyeballs.Connect (host, id, attempt, (ip, port)) ->
       begin
         let cancelled, cancel = Lwt.task () in
-        t.cancel_connecting <- Happy_eyeballs.Waiter_map.add id cancel t.cancel_connecting;
-        Lwt.pick [
-            try_connect ip port;
-            (cancelled >|= fun () -> Error (`Msg "cancelled"));
-          ] >>= fun r ->
-        t.cancel_connecting <- Happy_eyeballs.Waiter_map.remove id t.cancel_connecting;
-        match r with
-        | Ok fd ->
-          let waiters, r = Happy_eyeballs.Waiter_map.find_and_remove id t.waiters in
-          t.waiters <- waiters;
-          begin match r with
-            | Some waiter ->
-              Lwt.wakeup_later waiter (Ok ((ip, port), fd));
-              Lwt.return (Ok (Happy_eyeballs.Connected (host, id, (ip, port))))
-            | None ->
-              (* waiter already vanished *)
-              safe_close fd >>= fun () ->
-              Lwt.return (Error ())
-          end
-        | Error `Msg msg ->
-          Lwt.return (Ok (Happy_eyeballs.Connection_failed (host, id, (ip, port), msg)))
+        let entry = attempt, cancel in
+        t.cancel_connecting <-
+          Happy_eyeballs.Waiter_map.update id
+            (function None -> Some [ entry ] | Some c -> Some (entry :: c))
+            t.cancel_connecting;
+        let conn =
+          try_connect ip port >>= function
+          | Ok fd ->
+            let cancel_connecting, others =
+              Happy_eyeballs.Waiter_map.find_and_remove id t.cancel_connecting
+            in
+            t.cancel_connecting <- cancel_connecting;
+            List.iter (fun (att, w) -> if att <> attempt then Lwt.wakeup_later w ())
+              (Option.value ~default:[] others);
+            let waiters, r = Happy_eyeballs.Waiter_map.find_and_remove id t.waiters in
+            t.waiters <- waiters;
+            begin match r with
+              | Some waiter ->
+                Lwt.wakeup_later waiter (Ok ((ip, port), fd));
+                Lwt.return (Ok (Happy_eyeballs.Connected (host, id, (ip, port))))
+              | None ->
+                (* waiter already vanished *)
+                safe_close fd >>= fun () ->
+                Lwt.return (Error ())
+            end
+          | Error `Msg msg ->
+            t.cancel_connecting <-
+              Happy_eyeballs.Waiter_map.update id
+                (function None -> None | Some c ->
+                  match List.filter (fun (att, _) -> not (att = attempt)) c with
+                  | [] -> None
+                  | c -> Some c)
+                t.cancel_connecting;
+            Lwt.return (Ok (Happy_eyeballs.Connection_failed (host, id, (ip, port), msg)))
+        in
+        Lwt.pick [ conn; (cancelled >|= fun () -> Error ()); ]
       end
-    | Happy_eyeballs.Connect_cancelled (_host, id) ->
-      begin
-        match Happy_eyeballs.Waiter_map.find_opt id t.cancel_connecting with
-        | None -> ()
-        | Some th -> Lwt.wakeup th ()
-      end;
-      Lwt.return (Error ())
-    | Happy_eyeballs.Connect_failed (_host, id, msg) ->
+    | Happy_eyeballs.Connect_failed (host, id, msg) ->
+      let cancel_connecting, others =
+        Happy_eyeballs.Waiter_map.find_and_remove id t.cancel_connecting
+      in
+      t.cancel_connecting <- cancel_connecting;
+      List.iter (fun (_, w) -> Lwt.wakeup_later w ()) (Option.value ~default:[] others);
       let waiters, r = Happy_eyeballs.Waiter_map.find_and_remove id t.waiters in
       t.waiters <- waiters;
       begin match r with
         | Some waiter ->
-          Lwt.wakeup_later waiter (Error (`Msg ("connection failed: " ^ msg)));
+          let err =
+            Fmt.str "connection to %s failed: %s"
+              (match Ipaddr.of_domain_name host with
+               | None -> Domain_name.to_string host
+               | Some ip -> Ipaddr.to_string ip)
+              msg
+          in
+          Lwt.wakeup_later waiter (Error (`Msg err));
           Lwt.return (Error ())
         | None ->
           (* waiter already vanished *)
@@ -129,7 +149,13 @@ let rec timer t =
   Lwt_condition.wait t.timer_condition >>= fun () ->
   loop ()
 
-let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?(dns = Dns_client_lwt.create ()) ?(timer_interval = Duration.of_ms 10) () =
+let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?dns ?(timer_interval = Duration.of_ms 10) () =
+  let dns =
+    Option.value ~default:
+      (let timeout = Happy_eyeballs.resolve_timeout happy_eyeballs in
+       Dns_client_lwt.create ~timeout ())
+      dns
+  in
   let waiters = Happy_eyeballs.Waiter_map.empty
   and cancel_connecting = Happy_eyeballs.Waiter_map.empty
   and timer_condition = Lwt_condition.create ()
