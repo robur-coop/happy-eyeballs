@@ -88,13 +88,13 @@ end = struct
               (function None -> Some [ entry ] | Some c -> Some (entry :: c))
               t.cancel_connecting;
           let conn =
-            try_connect t.stack addr >|= function
+            try_connect t.stack addr >>= function
             | Ok flow ->
               let cancel_connecting, others =
                 Happy_eyeballs.Waiter_map.find_and_remove id t.cancel_connecting
               in
               t.cancel_connecting <- cancel_connecting;
-              List.iter (fun (att, u) -> if att <> attempt then Lwt.wakeup_later u ()) 
+              List.iter (fun (att, u) -> if att <> attempt then Lwt.wakeup_later u ())
                 (Option.value ~default:[] others);
               let waiters, r = Happy_eyeballs.Waiter_map.find_and_remove id t.waiters in
               t.waiters <- waiters;
