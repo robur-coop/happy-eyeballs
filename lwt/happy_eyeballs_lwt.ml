@@ -100,6 +100,11 @@ let rec act t action =
         Lwt.pick [ conn; (cancelled >|= fun () -> Error ()); ]
       end
     | Happy_eyeballs.Connect_failed (_host, id, msg) ->
+      let cancel_connecting, others =
+        Happy_eyeballs.Waiter_map.find_and_remove id t.cancel_connecting
+      in
+      t.cancel_connecting <- cancel_connecting;
+      List.iter (fun (_, w) -> Lwt.wakeup_later w ()) (Option.value ~default:[] others);
       let waiters, r = Happy_eyeballs.Waiter_map.find_and_remove id t.waiters in
       t.waiters <- waiters;
       begin match r with
