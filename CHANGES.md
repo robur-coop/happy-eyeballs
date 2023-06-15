@@ -1,3 +1,13 @@
+## v0.6.0 (2023-06-15)
+
+* Fix connection establishment: parallelize connection attempts, deal with
+  servers dropping packets (such as the Azure DNS resolver)
+* Introduce connect_delay (when to start the next connection attempt)
+* Deal with connect_timeout properly
+* Revise log output (IP vs domain name, fewer logs on debug level)
+
+All in #34, @hannesm, reviewed by @reynir -- sponsored by Semgrep Inc
+
 ## v0.5.0 (2023-02-16)
 
 * Adapt to dns-client 7.0.0 packaging changes (#31 @dinosaure)
