@@ -148,10 +148,13 @@ let tick t now host id conn =
   | Connecting (last_conn, active_conns, dsts) ->
     (* if there are further IP addresses, and there was no activity within
        connect_delay, start the next connection. *)
+    Log.debug (fun m -> m "now %Lu created %Lu last_conn %Lu connect_timeout %Lu connect_delay %Lu"
+                  now conn.created last_conn t.connect_timeout t.connect_delay);
     if Int64.sub now conn.created > t.connect_timeout then
       Error ()
     else if Int64.sub now last_conn > t.connect_delay then
-      (match dsts with
+      (Log.debug (fun m -> m "dsts is %u" (List.length dsts));
+       match dsts with
        | [] -> Ok (conn, [])
        | dst :: dsts ->
          let state = Connecting (now, dst :: active_conns, dsts)
@@ -177,8 +180,9 @@ let timer t now =
         in
         dm, actions) t.conns (Domain_name.Host_map.empty, [])
   in
-  Log.debug (fun m -> m "[%u] timer continue %B, %d actions: %a"
+  Log.debug (fun m -> m "[%u] timer continue %B, conns size %u, %d actions: %a"
                 t.counter (not (Domain_name.Host_map.is_empty conns))
+                (Domain_name.Host_map.cardinal conns)
                 (List.length actions)
                 Fmt.(list ~sep:(any "@.") pp_action) actions);
   { t with conns },
