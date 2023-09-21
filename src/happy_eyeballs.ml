@@ -419,9 +419,9 @@ let event t now e =
                   let cs = IM.add id { c with state } cs in
                   Domain_name.Host_map.add name cs t.conns, []
               end
-            | Connecting (ts, dst, ndst :: dsts) ->
+            | Connecting (_ts, dst, ndst :: dsts) ->
               let dst' = List.filter not_failed dst in
-              let state = Connecting (ts, ndst :: dst', dsts) in
+              let state = Connecting (now, ndst :: dst', dsts) in
               let attempt = c.attempt + 1 in
               let cs = IM.add id { c with state ; attempt } cs in
               Domain_name.Host_map.add name cs t.conns,
