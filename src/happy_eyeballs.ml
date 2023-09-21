@@ -31,6 +31,7 @@ type t = {
   resolve_timeout : int64 ;
   started : int64 ;
   resolve_retries : int ;
+  counter : int ;
   conns : connection IM.t Domain_name.Host_map.t ;
 }
 
@@ -86,6 +87,8 @@ let pp_event ppf = function
     Fmt.pf ppf "%u connected to %s (using %a:%d)" id (host_or_ip host)
       Ipaddr.pp ip port
 
+let ctr = ref 0
+
 let create
     ?(aaaa_timeout = Duration.of_ms 50)
     ?(connect_delay = Duration.of_ms 50)
@@ -93,6 +96,7 @@ let create
     ?(resolve_timeout = Duration.of_sec 1)
     ?(resolve_retries = 3)
     started =
+  incr ctr;
   {
     aaaa_timeout ;
     connect_delay ;
@@ -100,6 +104,7 @@ let create
     resolve_timeout ;
     resolve_retries ;
     started ;
+    counter = !ctr ;
     conns = Domain_name.Host_map.empty ;
   }
 
@@ -174,8 +179,8 @@ let timer t now =
   (match actions with
    | [] when not (Domain_name.Host_map.is_empty conns) -> ()
    | _ ->
-     Log.debug (fun m -> m "timer continue %B, %d actions: %a"
-                   (not (Domain_name.Host_map.is_empty conns))
+     Log.debug (fun m -> m "[%u] timer continue %B, %d actions: %a"
+                   t.counter (not (Domain_name.Host_map.is_empty conns))
                    (List.length actions)
                    Fmt.(list ~sep:(any "@.") pp_action) actions));
   { t with conns },
@@ -183,7 +188,8 @@ let timer t now =
   actions
 
 let connect t now ~id host ports =
-  Log.debug (fun m -> m "connect: id %d host %a" id Domain_name.pp host);
+  Log.debug (fun m -> m "[%u] connect: id %d host %a" t.counter id
+                Domain_name.pp host);
   if ports = [] then failwith "empty port list not supported";
   let conn = {
     created = now ;
@@ -194,8 +200,8 @@ let connect t now ~id host ports =
     attempt = 0 ;
   } in
   let actions = [ Resolve_aaaa host ; Resolve_a host ] in
-  Log.debug (fun m -> m "actions: %a" Fmt.(list ~sep:(any "@.") pp_action)
-                actions);
+  Log.debug (fun m -> m "[%u] actions: %a" t.counter
+                Fmt.(list ~sep:(any "@.") pp_action) actions);
   { t with conns = add_conn host id conn t.conns }, actions
 
 let merge ?(ipv4 = Ipaddr.V4.Set.empty) ?(ipv6 = Ipaddr.V6.Set.empty) ips =
@@ -254,9 +260,9 @@ let mix_dsts ?(ipv4 = Ipaddr.V4.Set.empty) ?(ipv6 = Ipaddr.V6.Set.empty) ports d
   shuffle ?first (List.rev v4_dsts @ v4s) (List.rev v6_dsts @ v6s)
 
 let connect_ip t now ~id dsts =
-  Log.debug (fun m -> m "connect_ip id %d dsts %a"
-                id
-                Fmt.(list ~sep:(any ", ") (pair ~sep:(any ":") Ipaddr.pp int)) dsts);
+  Log.debug (fun m -> m "[%u] connect_ip id %d dsts %a" t.counter id
+                Fmt.(list ~sep:(any ", ") (pair ~sep:(any ":") Ipaddr.pp int))
+                dsts);
   let dst, dsts = match dsts with
     | dst :: dsts -> dst, dsts
     | [] -> failwith "addresses are empty"
@@ -272,12 +278,12 @@ let connect_ip t now ~id dsts =
   } in
   let host = Ipaddr.to_domain_name (fst dst) in
   let actions = [ Connect (host, id, 0, dst) ] in
-  Log.debug (fun m -> m "actions: %a" Fmt.(list ~sep:(any "@.") pp_action)
-                actions);
+  Log.debug (fun m -> m "[%u] actions: %a" t.counter
+                Fmt.(list ~sep:(any "@.") pp_action) actions);
   { t with conns = add_conn host id conn t.conns }, actions
 
 let event t now e =
-  Log.debug (fun m -> m "received event %a" pp_event e);
+  Log.debug (fun m -> m "[%u] received event %a" t.counter pp_event e);
   let t, actions =
     match e with
     | Resolved_a (name, ips) ->
@@ -391,14 +397,14 @@ let event t now e =
       let conns, actions =
         match Domain_name.Host_map.find name t.conns with
         | None ->
-          Log.warn (fun m -> m "connection failed to %s: %s; no entry in conns"
-                       (host_or_ip name) reason);
+          Log.warn (fun m -> m "[%u] connection failed to %s: %s; no entry in conns"
+                       t.counter (host_or_ip name) reason);
           t.conns, []
         | Some cs ->
           match IM.find_opt id cs with
           | None ->
-            Log.warn (fun m -> m "%u connection failed to %s: %s; no entry in IM"
-                         id (host_or_ip name) reason);
+            Log.warn (fun m -> m "[%u] %u connection failed to %s: %s; no entry in IM"
+                         t.counter id (host_or_ip name) reason);
             t.conns, []
           | Some c ->
             let not_failed (ip', port') = not (Ipaddr.compare ip ip' = 0 && port = port') in
@@ -433,8 +439,8 @@ let event t now e =
       let conns =
         Domain_name.Host_map.update name (function
             | None ->
-              Log.warn (fun m -> m "connected to an unexpected domain: %a"
-                           Domain_name.pp name);
+              Log.warn (fun m -> m "[%u] connected to an unexpected domain: %a"
+                           t.counter Domain_name.pp name);
               None
             | Some xs ->
               let m = IM.remove id xs in
@@ -443,8 +449,8 @@ let event t now e =
       in
       { t with conns }, []
   in
-  Log.debug (fun m -> m "actions: %a" Fmt.(list ~sep:(any "@.") pp_action)
-                actions);
+  Log.debug (fun m -> m "[%u] actions: %a" t.counter
+                Fmt.(list ~sep:(any "@.") pp_action) actions);
   t, actions
 
 module Waiter_map = struct
