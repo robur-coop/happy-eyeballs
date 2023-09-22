@@ -17,6 +17,7 @@ type t = {
   dns : Dns_client_lwt.t ;
   timer_interval : float ;
   timer_condition : unit Lwt_condition.t ;
+  counter : int ;
 }
 
 let safe_close fd =
@@ -45,7 +46,8 @@ let try_connect ip port =
 
 let rec act t action =
   let open Lwt.Infix in
-  Log.debug (fun m -> m "action %a" Happy_eyeballs.pp_action action);
+  Log.debug (fun m -> m "[%u] action %a" t.counter
+                Happy_eyeballs.pp_action action);
   begin
     match action with
     | Happy_eyeballs.Resolve_a host ->
@@ -149,6 +151,8 @@ let rec timer t =
   Lwt_condition.wait t.timer_condition >>= fun () ->
   loop ()
 
+let ctr = ref 0
+
 let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?dns ?(timer_interval = Duration.of_ms 10) () =
   let dns =
     Option.value ~default:
@@ -161,7 +165,8 @@ let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?dns ?(timer_inter
   and timer_condition = Lwt_condition.create ()
   in
   let timer_interval = Duration.to_f timer_interval in
-  let t = { waiters ; cancel_connecting ; he = happy_eyeballs ; dns ; timer_interval ; timer_condition } in
+  incr ctr;
+  let t = { waiters ; cancel_connecting ; he = happy_eyeballs ; dns ; timer_interval ; timer_condition ; counter = !ctr } in
   Lwt.async (fun () -> timer t);
   t
 
@@ -179,8 +184,8 @@ let connect_host t host ports =
   handle_actions t actions;
   let open Lwt.Infix in
   waiter >|= fun r ->
-  Log.debug (fun m -> m "connection %s to %a after %a"
-                (match r with Ok _ -> "ok" | Error _ -> "failed")
+  Log.debug (fun m -> m "[%u] connection %s to %a after %a"
+                t.counter (match r with Ok _ -> "ok" | Error _ -> "failed")
                 Domain_name.pp host Duration.pp (Int64.sub (now ()) ts));
   r
 
@@ -195,8 +200,8 @@ let connect_ip t addresses =
   handle_actions t actions;
   let open Lwt.Infix in
   waiter >|= fun r ->
-  Log.debug (fun m -> m "connection %s to %a after %a"
-                (match r with Ok _ -> "ok" | Error _ -> "failed")
+  Log.debug (fun m -> m "[%u] connection %s to %a after %a"
+                t.counter (match r with Ok _ -> "ok" | Error _ -> "failed")
                 Fmt.(list ~sep:(any ", ") (pair ~sep:(any ":") Ipaddr.pp int))
                 addresses
                 Duration.pp (Int64.sub (now ()) ts));

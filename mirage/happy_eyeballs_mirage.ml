@@ -30,6 +30,8 @@ end
 let src = Logs.Src.create "happy-eyeballs.mirage" ~doc:"Happy Eyeballs Mirage"
 module Log = (val Logs.src_log src : Logs.LOG)
 
+let ctr = ref 0
+
 module Make (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) (S : Tcpip.Stack.V4V6)
   (DNS : Dns_client_mirage.S with type Transport.stack = S.t) : sig
   include S
@@ -55,6 +57,7 @@ end = struct
     mutable he : Happy_eyeballs.t ;
     timer_interval : int64 ;
     timer_condition : unit Lwt_condition.t ;
+    counter : int ;
   }
 
   let try_connect stack addr =
@@ -65,7 +68,8 @@ end = struct
 
   let rec act t action =
     let open Lwt.Infix in
-    Log.debug (fun m -> m "action %a" Happy_eyeballs.pp_action action);
+    Log.debug (fun m -> m "[%u] action %a" t.counter
+                  Happy_eyeballs.pp_action action);
     begin
       match action with
       | Happy_eyeballs.Resolve_a host ->
@@ -179,7 +183,8 @@ end = struct
     and cancel_connecting = Happy_eyeballs.Waiter_map.empty
     and timer_condition = Lwt_condition.create ()
     in
-    let t = { dns ; stack ; waiters ; cancel_connecting ; he = happy_eyeballs ; timer_interval ; timer_condition } in
+    incr ctr;
+    let t = { dns ; stack ; waiters ; cancel_connecting ; he = happy_eyeballs ; timer_interval ; timer_condition ; counter = !ctr } in
     Lwt.async (fun () -> timer t);
     t
 
@@ -201,8 +206,8 @@ end = struct
     handle_actions t actions;
     let open Lwt.Infix in
     waiter >|= fun r ->
-    Log.debug (fun m -> m "connection %s to %a after %a"
-                  (match r with Ok _ -> "ok" | Error _ -> "failed")
+    Log.debug (fun m -> m "[%u] connection %s to %a after %a"
+                  t.counter (match r with Ok _ -> "ok" | Error _ -> "failed")
                   Domain_name.pp host
                   Duration.pp (Int64.sub (C.elapsed_ns ()) ts));
     open_msg_error r
@@ -218,8 +223,8 @@ end = struct
     handle_actions t actions;
     let open Lwt.Infix in
     waiter >|= fun r ->
-    Log.debug (fun m -> m "connection %s to %a after %a"
-                  (match r with Ok _ -> "ok" | Error _ -> "failed")
+    Log.debug (fun m -> m "[%u] connection %s to %a after %a"
+                  t.counter (match r with Ok _ -> "ok" | Error _ -> "failed")
                   Fmt.(list ~sep:(any ", ") (pair ~sep:(any ":") Ipaddr.pp int))
                   addresses
                   Duration.pp (Int64.sub (C.elapsed_ns ()) ts));
