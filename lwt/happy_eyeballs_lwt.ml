@@ -22,7 +22,7 @@ type t = {
   timer_interval : float ;
   timer_condition : unit Lwt_condition.t ;
   counter : int ;
-  mutable getaddrinfo : getaddrinfo ;
+  mutable dns : getaddrinfo ;
 }
 
 let inject ~getaddrinfo t =
@@ -60,13 +60,13 @@ let rec act t action =
     match action with
     | Happy_eyeballs.Resolve_a host ->
       begin
-        t.getaddrinfo.getaddrinfo Dns.Rr_map.A host >|= function
+        t.dns.getaddrinfo Dns.Rr_map.A host >|= function
         | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_a (host, res))
         | Error `Msg msg -> Ok (Happy_eyeballs.Resolved_a_failed (host, msg))
       end
     | Happy_eyeballs.Resolve_aaaa host ->
       begin
-        t.getaddrinfo.getaddrinfo Dns.Rr_map.Aaaa host >|= function
+        t.dns.getaddrinfo Dns.Rr_map.Aaaa host >|= function
         | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_aaaa (host, res))
         | Error `Msg msg -> Ok (Happy_eyeballs.Resolved_aaaa_failed (host, msg))
       end
@@ -165,7 +165,7 @@ let dummy =
   let getaddrinfo _ _ = Lwt.return_error (`Msg "The DNS stack is missing") in
   { getaddrinfo }
 
-let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?(getaddrinfo= dummy)
+let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?getaddrinfo:(dns= dummy)
   ?(timer_interval = Duration.of_ms 10) () =
   let waiters = Happy_eyeballs.Waiter_map.empty
   and cancel_connecting = Happy_eyeballs.Waiter_map.empty
@@ -173,7 +173,7 @@ let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?(getaddrinfo= dum
   in
   let timer_interval = Duration.to_f timer_interval in
   incr ctr;
-  let t = { waiters ; cancel_connecting ; he = happy_eyeballs ; getaddrinfo ; timer_interval ; timer_condition ; counter = !ctr } in
+  let t = { waiters ; cancel_connecting ; he = happy_eyeballs ; dns ; timer_interval ; timer_condition ; counter = !ctr } in
   Lwt.async (fun () -> timer t);
   t
 
