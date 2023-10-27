@@ -33,4 +33,9 @@ val connect : t -> string -> int list ->
 
     @raise Failure if [ports] is the empty list. *)
 
-val inject : getaddrinfo:getaddrinfo -> t -> unit
+val inject : getaddrinfo -> t -> unit
+(** [inject getaddrinfo t] injects a domain-name resolver into the given
+    happy-eyeballs instance. By default, the happy-eyeballs instance is not
+    able to resolve domain-name. However, if the user has an implementation
+    of [getaddrinfo] which is able to resolve domain-name, the user can
+    inject it. By this way, the function {!val:connect_host} will works. *)

@@ -25,8 +25,8 @@ type t = {
   mutable dns : getaddrinfo ;
 }
 
-let inject ~getaddrinfo t =
-  t.getaddrinfo <- getaddrinfo
+let inject getaddrinfo t =
+  t.dns <- getaddrinfo
 
 let safe_close fd =
   if Lwt_unix.state fd = Lwt_unix.Closed then
