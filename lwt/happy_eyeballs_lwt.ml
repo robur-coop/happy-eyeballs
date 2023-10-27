@@ -10,15 +10,23 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 let now = Mtime_clock.elapsed_ns
 
+type getaddrinfo = {
+  getaddrinfo : 'response 'a.
+    'response Dns.Rr_map.key -> 'a Domain_name.t -> ('response, [ `Msg of string ]) result Lwt.t
+} [@@unboxed]
+
 type t = {
   mutable waiters : ((Ipaddr.t * int) * Lwt_unix.file_descr, [ `Msg of string ]) result Lwt.u Happy_eyeballs.Waiter_map.t ;
   mutable cancel_connecting : (int * unit Lwt.u) list Happy_eyeballs.Waiter_map.t;
   mutable he : Happy_eyeballs.t ;
-  dns : Dns_client_lwt.t ;
   timer_interval : float ;
   timer_condition : unit Lwt_condition.t ;
   counter : int ;
+  mutable getaddrinfo : getaddrinfo ;
 }
+
+let inject ~getaddrinfo t =
+  t.getaddrinfo <- getaddrinfo
 
 let safe_close fd =
   if Lwt_unix.state fd = Lwt_unix.Closed then
@@ -52,13 +60,13 @@ let rec act t action =
     match action with
     | Happy_eyeballs.Resolve_a host ->
       begin
-        Dns_client_lwt.getaddrinfo t.dns Dns.Rr_map.A host >|= function
+        t.getaddrinfo.getaddrinfo Dns.Rr_map.A host >|= function
         | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_a (host, res))
         | Error `Msg msg -> Ok (Happy_eyeballs.Resolved_a_failed (host, msg))
       end
     | Happy_eyeballs.Resolve_aaaa host ->
       begin
-        Dns_client_lwt.getaddrinfo t.dns Dns.Rr_map.Aaaa host >|= function
+        t.getaddrinfo.getaddrinfo Dns.Rr_map.Aaaa host >|= function
         | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_aaaa (host, res))
         | Error `Msg msg -> Ok (Happy_eyeballs.Resolved_aaaa_failed (host, msg))
       end
@@ -153,20 +161,19 @@ let rec timer t =
 
 let ctr = ref 0
 
-let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?dns ?(timer_interval = Duration.of_ms 10) () =
-  let dns =
-    Option.value ~default:
-      (let timeout = Happy_eyeballs.resolve_timeout happy_eyeballs in
-       Dns_client_lwt.create ~timeout ())
-      dns
-  in
+let dummy =
+  let getaddrinfo _ _ = Lwt.return_error (`Msg "The DNS stack is missing") in
+  { getaddrinfo }
+
+let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?(getaddrinfo= dummy)
+  ?(timer_interval = Duration.of_ms 10) () =
   let waiters = Happy_eyeballs.Waiter_map.empty
   and cancel_connecting = Happy_eyeballs.Waiter_map.empty
   and timer_condition = Lwt_condition.create ()
   in
   let timer_interval = Duration.to_f timer_interval in
   incr ctr;
-  let t = { waiters ; cancel_connecting ; he = happy_eyeballs ; dns ; timer_interval ; timer_condition ; counter = !ctr } in
+  let t = { waiters ; cancel_connecting ; he = happy_eyeballs ; getaddrinfo ; timer_interval ; timer_condition ; counter = !ctr } in
   Lwt.async (fun () -> timer t);
   t
 
