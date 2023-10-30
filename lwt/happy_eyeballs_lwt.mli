@@ -1,10 +1,7 @@
 (** The type of the abstract state of happy eyeballs. *)
 type t
 
-type getaddrinfo = {
-  getaddrinfo : 'response 'a.
-    'response Dns.Rr_map.key -> 'a Domain_name.t -> ('response, [ `Msg of string ]) result Lwt.t
-} [@@unboxed]
+type getaddrinfo = [ `A | `AAAA ] -> [ `host ] Domain_name.t -> (Ipaddr.Set.t, [ `Msg of string ]) result Lwt.t
 
 val create : ?happy_eyeballs:Happy_eyeballs.t ->
   ?getaddrinfo:getaddrinfo ->
@@ -38,4 +35,20 @@ val inject : getaddrinfo -> t -> unit
     happy-eyeballs instance. By default, the happy-eyeballs instance is not
     able to resolve domain-name. However, if the user has an implementation
     of [getaddrinfo] which is able to resolve domain-name, the user can
-    inject it. By this way, the function {!val:connect_host} will works. *)
+    inject it. By this way, the function {!val:connect_host} will works.
+
+    So, the usual {i ceremony} for using happy-eyeballs is to create a
+    happy-eyeballs instance, obtain an instance that can resolve domain names
+    (such as [ocaml-dns]) and inject the latter's implementation into our first
+    happy-eyeballs instance:
+
+    {[
+      let _ =
+        let happy_eyeballs = Happy_eyeballs_lwt.create () in
+        let dns = Dns_lwt.create () in
+        Happy_eyeballs_lwt.inject (Dns_lwt.getaddrinfo dns) happy_eyeballs;
+        Happy_eyeballs_lwt.connect happy_eyeballs "robur.coop" [ 443 ]
+        >>= function
+        | Ok (_, fd) -> ...
+        | Error _ -> ...
+    ]} *)
