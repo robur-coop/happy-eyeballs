@@ -166,10 +166,26 @@ let rec timer t =
   loop ()
 
 let ctr = ref 0
+let error_msgf fmt = Fmt.kstr (fun msg -> Error (`Msg msg)) fmt
 
-let dummy _ _ = Lwt.return_error (`Msg "The DNS stack is missing")
+let getaddrinfo record domain_name =
+  let open Lwt.Infix in
+  let getaddrinfo_option = match record with
+    | `A -> [ Unix.AI_FAMILY Unix.PF_INET ]
+    | `AAAA -> [ Unix.AI_FAMILY Unix.PF_INET6 ] in
+  let getaddrinfo_option = Unix.AI_SOCKTYPE Unix.SOCK_STREAM :: getaddrinfo_option in
+  Lwt.catch
+    (fun () -> Lwt_unix.getaddrinfo (Domain_name.to_string domain_name) "" getaddrinfo_option)
+    (fun exn -> Lwt.return []) >|= function
+  | [] -> error_msgf "%a not found" Domain_name.pp domain_name
+  | addrs ->
+    let set = List.fold_left (fun set { Unix.ai_addr; _ } -> match ai_addr with
+      | Unix.ADDR_INET (inet_addr, _) -> Ipaddr.Set.add (Ipaddr_unix.of_inet_addr inet_addr) set
+      | Unix.ADDR_UNIX _ -> set)
+      Ipaddr.Set.empty addrs in
+    Ok set
 
-let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?(getaddrinfo= dummy)
+let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?(getaddrinfo= getaddrinfo)
   ?(timer_interval = Duration.of_ms 10) () =
   let waiters = Happy_eyeballs.Waiter_map.empty
   and cancel_connecting = Happy_eyeballs.Waiter_map.empty
