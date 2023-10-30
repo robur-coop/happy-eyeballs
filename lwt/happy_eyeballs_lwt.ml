@@ -50,15 +50,13 @@ let try_connect ip port =
 
 let rec act t action =
   let open Lwt.Infix in
-  let ( >>? ) = Lwt_result.bind in
   Log.debug (fun m -> m "[%u] action %a" t.counter
                 Happy_eyeballs.pp_action action);
   begin
     match action with
     | Happy_eyeballs.Resolve_a host ->
       begin
-        Lwt.return (Domain_name.host host) >>?
-        (fst t.getaddrinfo) >|= function
+        (fst t.getaddrinfo) host >|= function
         | Ok set ->
           if Ipaddr.V4.Set.is_empty set then
             Ok (Happy_eyeballs.Resolved_a_failed (host, "getaddrinfo returned the empty set"))
@@ -68,8 +66,7 @@ let rec act t action =
       end
     | Happy_eyeballs.Resolve_aaaa host ->
       begin
-        Lwt.return (Domain_name.host host) >>?
-        (snd t.getaddrinfo) >|= function
+        (snd t.getaddrinfo) host >|= function
         | Ok set ->
           if Ipaddr.V6.Set.is_empty set then
             Ok (Happy_eyeballs.Resolved_aaaa_failed (host, "getaddrinfo returned the empty set"))
@@ -180,41 +177,29 @@ let getaddrinfo =
          Lwt.return (Error (`Msg ("failed to resolve " ^ Domain_name.to_string domain_name ^ ": " ^ msg))))
   in
   (fun name ->
-     fn [ Unix.AI_FAMILY Unix.PF_INET ] name >>= fun addrs ->
-     let res =
-       List.fold_left (fun set { Unix.ai_addr; _ } -> match ai_addr with
-           | Unix.ADDR_INET (inet_addr, _) ->
-             (match Ipaddr_unix.V4.of_inet_addr inet_addr with
-              | None ->
-                Log.warn (fun m -> m "while resolving %a couldn't convert %s to IPv4 address"
-                             Domain_name.pp name (Unix.string_of_inet_addr inet_addr));
-                set
-              | Some ipv4 -> Ipaddr.V4.Set.add ipv4 set)
-           | Unix.ADDR_UNIX _ -> set)
-         Ipaddr.V4.Set.empty addrs
-     in
-     if Ipaddr.V4.Set.is_empty res then
-       Lwt.return (Error (`Msg ("failed to resolve IPv4 address of " ^ Domain_name.to_string name)))
-     else
-       Lwt.return (Ok res)),
+     fn [ Unix.AI_FAMILY Unix.PF_INET ] name >|= fun addrs ->
+     List.fold_left (fun set { Unix.ai_addr; _ } -> match ai_addr with
+         | Unix.ADDR_INET (inet_addr, _) ->
+           (match Ipaddr_unix.V4.of_inet_addr inet_addr with
+            | None ->
+              Log.warn (fun m -> m "while resolving %a couldn't convert %s to IPv4 address"
+                           Domain_name.pp name (Unix.string_of_inet_addr inet_addr));
+              set
+            | Some ipv4 -> Ipaddr.V4.Set.add ipv4 set)
+         | Unix.ADDR_UNIX _ -> set)
+       Ipaddr.V4.Set.empty addrs),
   (fun name ->
-     fn [ Unix.AI_FAMILY Unix.PF_INET6 ] name >>= fun addrs ->
-     let res =
-       List.fold_left (fun set { Unix.ai_addr; _ } -> match ai_addr with
-           | Unix.ADDR_INET (inet_addr, _) ->
-             (match Ipaddr_unix.V6.of_inet_addr inet_addr with
-              | None ->
-                Log.warn (fun m -> m "while resolving %a couldn't convert %s to IPv6 address"
-                             Domain_name.pp name (Unix.string_of_inet_addr inet_addr));
-                set
-              | Some ipv6 -> Ipaddr.V6.Set.add ipv6 set)
-           | Unix.ADDR_UNIX _ -> set)
-         Ipaddr.V6.Set.empty addrs
-     in
-     if Ipaddr.V6.Set.is_empty res then
-       Lwt.return (Error (`Msg ("failed to resolve IPv6 address of " ^ Domain_name.to_string name)))
-     else
-       Lwt.return (Ok res))
+     fn [ Unix.AI_FAMILY Unix.PF_INET6 ] name >|= fun addrs ->
+     List.fold_left (fun set { Unix.ai_addr; _ } -> match ai_addr with
+         | Unix.ADDR_INET (inet_addr, _) ->
+           (match Ipaddr_unix.V6.of_inet_addr inet_addr with
+            | None ->
+              Log.warn (fun m -> m "while resolving %a couldn't convert %s to IPv6 address"
+                           Domain_name.pp name (Unix.string_of_inet_addr inet_addr));
+              set
+            | Some ipv6 -> Ipaddr.V6.Set.add ipv6 set)
+         | Unix.ADDR_UNIX _ -> set)
+       Ipaddr.V6.Set.empty addrs)
 
 let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?(getaddrinfo= getaddrinfo)
   ?(timer_interval = Duration.of_ms 10) () =
