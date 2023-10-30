@@ -1,7 +1,12 @@
 (** The type of the abstract state of happy eyeballs. *)
 type t
 
-type getaddrinfo = [ `A | `AAAA ] -> [ `host ] Domain_name.t -> (Ipaddr.Set.t, [ `Msg of string ]) result Lwt.t
+(** The type of receiving an IPv4 or IPv6 address via DNS by providing a
+    hostname. This is a pair of functions to avoid complexity in types or being
+    too vague (and defer to run-time checking). *)
+type getaddrinfo =
+  ([ `host ] Domain_name.t -> (Ipaddr.V4.Set.t, [ `Msg of string ]) result Lwt.t) *
+  ([ `host ] Domain_name.t -> (Ipaddr.V6.Set.t, [ `Msg of string ]) result Lwt.t)
 
 val create : ?happy_eyeballs:Happy_eyeballs.t ->
   ?getaddrinfo:getaddrinfo ->
@@ -29,26 +34,3 @@ val connect : t -> string -> int list ->
     may be a host name, or an IP address.
 
     @raise Failure if [ports] is the empty list. *)
-
-val inject : getaddrinfo -> t -> unit
-(** [inject getaddrinfo t] injects a {i new} domain-name resolver into the given
-    happy-eyeballs instance. By default, the happy-eyeballs instance use
-    {!val:Unix.getaddrinfo} to be able to resolve domain-name. However, the user
-    can choose to use its own implementation of a DNS resolver (like
-    [ocaml-dns]).
-
-    So, the {i ceremony} for using happy-eyeballs with your own DNS resolver is
-    to create a happy-eyeballs instance, obtain an instance that can resolve
-    domain names (such as [ocaml-dns]) and inject the latter's implementation
-    into our first happy-eyeballs instance:
-
-    {[
-      let _ =
-        let happy_eyeballs = Happy_eyeballs_lwt.create () in
-        let dns = Dns_client_lwt.create () in
-        Happy_eyeballs_lwt.inject (Dns_client_lwt.getaddrinfo dns) happy_eyeballs;
-        Happy_eyeballs_lwt.connect happy_eyeballs "robur.coop" [ 443 ]
-        >>= function
-        | Ok (_, fd) -> ...
-        | Error _ -> ...
-    ]} *)

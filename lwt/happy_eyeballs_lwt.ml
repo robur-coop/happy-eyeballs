@@ -10,7 +10,9 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 let now = Mtime_clock.elapsed_ns
 
-type getaddrinfo = [ `A | `AAAA ] -> [ `host ] Domain_name.t -> (Ipaddr.Set.t, [ `Msg of string ]) result Lwt.t
+type getaddrinfo =
+  ([ `host ] Domain_name.t -> (Ipaddr.V4.Set.t, [ `Msg of string ]) result Lwt.t) *
+  ([ `host ] Domain_name.t -> (Ipaddr.V6.Set.t, [ `Msg of string ]) result Lwt.t)
 
 type t = {
   mutable waiters : ((Ipaddr.t * int) * Lwt_unix.file_descr, [ `Msg of string ]) result Lwt.u Happy_eyeballs.Waiter_map.t ;
@@ -19,11 +21,8 @@ type t = {
   timer_interval : float ;
   timer_condition : unit Lwt_condition.t ;
   counter : int ;
-  mutable getaddrinfo : getaddrinfo ;
+  getaddrinfo : getaddrinfo ;
 }
-
-let inject getaddrinfo t =
-  t.getaddrinfo <- getaddrinfo
 
 let safe_close fd =
   if Lwt_unix.state fd = Lwt_unix.Closed then
@@ -56,25 +55,27 @@ let rec act t action =
                 Happy_eyeballs.pp_action action);
   begin
     match action with
-    | Happy_eyeballs.Resolve_a host | Happy_eyeballs.Resolve_aaaa host ->
+    | Happy_eyeballs.Resolve_a host ->
       begin
-        let record = match action with
-          | Happy_eyeballs.Resolve_a _ -> `A
-          | Happy_eyeballs.Resolve_aaaa _ -> `AAAA
-          | _ -> assert false (* never occur! *) in
         Lwt.return (Domain_name.host host) >>?
-        t.getaddrinfo record >|= fun res -> match res, record with
-        | Ok set, `A ->
-          let fold ip set = match ip with
-            | Ipaddr.V4 ipv4 -> Ipaddr.V4.Set.add ipv4 set
-            | _ -> set in
-          Ok (Happy_eyeballs.Resolved_a (host, Ipaddr.Set.fold fold set Ipaddr.V4.Set.empty))
-        | Ok set, `AAAA ->
-          let fold ip set = match ip with
-            | Ipaddr.V6 ipv6 -> Ipaddr.V6.Set.add ipv6 set
-            | _ -> set in
-          Ok (Happy_eyeballs.Resolved_aaaa (host, Ipaddr.Set.fold fold set Ipaddr.V6.Set.empty))
-        | Error `Msg msg, _ -> Ok (Happy_eyeballs.Resolved_a_failed (host, msg))
+        (fst t.getaddrinfo) >|= function
+        | Ok set ->
+          if Ipaddr.V4.Set.is_empty set then
+            Ok (Happy_eyeballs.Resolved_a_failed (host, "getaddrinfo returned the empty set"))
+          else
+            Ok (Happy_eyeballs.Resolved_a (host, set))
+        | Error `Msg msg -> Ok (Happy_eyeballs.Resolved_a_failed (host, msg))
+      end
+    | Happy_eyeballs.Resolve_aaaa host ->
+      begin
+        Lwt.return (Domain_name.host host) >>?
+        (snd t.getaddrinfo) >|= function
+        | Ok set ->
+          if Ipaddr.V6.Set.is_empty set then
+            Ok (Happy_eyeballs.Resolved_aaaa_failed (host, "getaddrinfo returned the empty set"))
+          else
+            Ok (Happy_eyeballs.Resolved_aaaa (host, set))
+        | Error `Msg msg -> Ok (Happy_eyeballs.Resolved_aaaa_failed (host, msg))
       end
     | Happy_eyeballs.Connect (host, id, attempt, (ip, port)) ->
       begin
@@ -166,24 +167,54 @@ let rec timer t =
   loop ()
 
 let ctr = ref 0
-let error_msgf fmt = Fmt.kstr (fun msg -> Error (`Msg msg)) fmt
 
-let getaddrinfo record domain_name =
-  let open Lwt.Infix in
-  let getaddrinfo_option = match record with
-    | `A -> [ Unix.AI_FAMILY Unix.PF_INET ]
-    | `AAAA -> [ Unix.AI_FAMILY Unix.PF_INET6 ] in
-  let getaddrinfo_option = Unix.AI_SOCKTYPE Unix.SOCK_STREAM :: getaddrinfo_option in
-  Lwt.catch
-    (fun () -> Lwt_unix.getaddrinfo (Domain_name.to_string domain_name) "" getaddrinfo_option)
-    (fun exn -> Lwt.return []) >|= function
-  | [] -> error_msgf "%a not found" Domain_name.pp domain_name
-  | addrs ->
-    let set = List.fold_left (fun set { Unix.ai_addr; _ } -> match ai_addr with
-      | Unix.ADDR_INET (inet_addr, _) -> Ipaddr.Set.add (Ipaddr_unix.of_inet_addr inet_addr) set
-      | Unix.ADDR_UNIX _ -> set)
-      Ipaddr.Set.empty addrs in
-    Ok set
+let getaddrinfo =
+  let open Lwt_result.Infix in
+  let fn opts domain_name =
+    let getaddrinfo_option = Unix.AI_SOCKTYPE Unix.SOCK_STREAM :: opts in
+    Lwt.catch
+      (fun () ->
+         Lwt_result.ok (Lwt_unix.getaddrinfo (Domain_name.to_string domain_name) "" getaddrinfo_option))
+      (fun exn ->
+         let msg = Printexc.to_string exn in
+         Lwt.return (Error (`Msg ("failed to resolve " ^ Domain_name.to_string domain_name ^ ": " ^ msg))))
+  in
+  (fun name ->
+     fn [ Unix.AI_FAMILY Unix.PF_INET ] name >>= fun addrs ->
+     let res =
+       List.fold_left (fun set { Unix.ai_addr; _ } -> match ai_addr with
+           | Unix.ADDR_INET (inet_addr, _) ->
+             (match Ipaddr_unix.V4.of_inet_addr inet_addr with
+              | None ->
+                Log.warn (fun m -> m "while resolving %a couldn't convert %s to IPv4 address"
+                             Domain_name.pp name (Unix.string_of_inet_addr inet_addr));
+                set
+              | Some ipv4 -> Ipaddr.V4.Set.add ipv4 set)
+           | Unix.ADDR_UNIX _ -> set)
+         Ipaddr.V4.Set.empty addrs
+     in
+     if Ipaddr.V4.Set.is_empty res then
+       Lwt.return (Error (`Msg ("failed to resolve IPv4 address of " ^ Domain_name.to_string name)))
+     else
+       Lwt.return (Ok res)),
+  (fun name ->
+     fn [ Unix.AI_FAMILY Unix.PF_INET6 ] name >>= fun addrs ->
+     let res =
+       List.fold_left (fun set { Unix.ai_addr; _ } -> match ai_addr with
+           | Unix.ADDR_INET (inet_addr, _) ->
+             (match Ipaddr_unix.V6.of_inet_addr inet_addr with
+              | None ->
+                Log.warn (fun m -> m "while resolving %a couldn't convert %s to IPv6 address"
+                             Domain_name.pp name (Unix.string_of_inet_addr inet_addr));
+                set
+              | Some ipv6 -> Ipaddr.V6.Set.add ipv6 set)
+           | Unix.ADDR_UNIX _ -> set)
+         Ipaddr.V6.Set.empty addrs
+     in
+     if Ipaddr.V6.Set.is_empty res then
+       Lwt.return (Error (`Msg ("failed to resolve IPv6 address of " ^ Domain_name.to_string name)))
+     else
+       Lwt.return (Ok res))
 
 let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?(getaddrinfo= getaddrinfo)
   ?(timer_interval = Duration.of_ms 10) () =
