@@ -10,10 +10,7 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 let now = Mtime_clock.elapsed_ns
 
-type getaddrinfo = {
-  getaddrinfo : 'response 'a.
-    'response Dns.Rr_map.key -> 'a Domain_name.t -> ('response, [ `Msg of string ]) result Lwt.t
-} [@@unboxed]
+type getaddrinfo = [ `A | `AAAA ] -> [ `host ] Domain_name.t -> (Ipaddr.Set.t, [ `Msg of string ]) result Lwt.t
 
 type t = {
   mutable waiters : ((Ipaddr.t * int) * Lwt_unix.file_descr, [ `Msg of string ]) result Lwt.u Happy_eyeballs.Waiter_map.t ;
@@ -22,11 +19,11 @@ type t = {
   timer_interval : float ;
   timer_condition : unit Lwt_condition.t ;
   counter : int ;
-  mutable dns : getaddrinfo ;
+  mutable getaddrinfo : getaddrinfo ;
 }
 
 let inject getaddrinfo t =
-  t.dns <- getaddrinfo
+  t.getaddrinfo <- getaddrinfo
 
 let safe_close fd =
   if Lwt_unix.state fd = Lwt_unix.Closed then
@@ -54,21 +51,30 @@ let try_connect ip port =
 
 let rec act t action =
   let open Lwt.Infix in
+  let ( >>? ) = Lwt_result.bind in
   Log.debug (fun m -> m "[%u] action %a" t.counter
                 Happy_eyeballs.pp_action action);
   begin
     match action with
-    | Happy_eyeballs.Resolve_a host ->
+    | Happy_eyeballs.Resolve_a host | Happy_eyeballs.Resolve_aaaa host ->
       begin
-        t.dns.getaddrinfo Dns.Rr_map.A host >|= function
-        | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_a (host, res))
-        | Error `Msg msg -> Ok (Happy_eyeballs.Resolved_a_failed (host, msg))
-      end
-    | Happy_eyeballs.Resolve_aaaa host ->
-      begin
-        t.dns.getaddrinfo Dns.Rr_map.Aaaa host >|= function
-        | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_aaaa (host, res))
-        | Error `Msg msg -> Ok (Happy_eyeballs.Resolved_aaaa_failed (host, msg))
+        let record = match action with
+          | Happy_eyeballs.Resolve_a _ -> `A
+          | Happy_eyeballs.Resolve_aaaa _ -> `AAAA
+          | _ -> assert false (* never occur! *) in
+        Lwt.return (Domain_name.host host) >>?
+        t.getaddrinfo record >|= fun res -> match res, record with
+        | Ok set, `A ->
+          let fold ip set = match ip with
+            | Ipaddr.V4 ipv4 -> Ipaddr.V4.Set.add ipv4 set
+            | _ -> set in
+          Ok (Happy_eyeballs.Resolved_a (host, Ipaddr.Set.fold fold set Ipaddr.V4.Set.empty))
+        | Ok set, `AAAA ->
+          let fold ip set = match ip with
+            | Ipaddr.V6 ipv6 -> Ipaddr.V6.Set.add ipv6 set
+            | _ -> set in
+          Ok (Happy_eyeballs.Resolved_aaaa (host, Ipaddr.Set.fold fold set Ipaddr.V6.Set.empty))
+        | Error `Msg msg, _ -> Ok (Happy_eyeballs.Resolved_a_failed (host, msg))
       end
     | Happy_eyeballs.Connect (host, id, attempt, (ip, port)) ->
       begin
@@ -161,11 +167,9 @@ let rec timer t =
 
 let ctr = ref 0
 
-let dummy =
-  let getaddrinfo _ _ = Lwt.return_error (`Msg "The DNS stack is missing") in
-  { getaddrinfo }
+let dummy _ _ = Lwt.return_error (`Msg "The DNS stack is missing")
 
-let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?getaddrinfo:(dns= dummy)
+let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?(getaddrinfo= dummy)
   ?(timer_interval = Duration.of_ms 10) () =
   let waiters = Happy_eyeballs.Waiter_map.empty
   and cancel_connecting = Happy_eyeballs.Waiter_map.empty
@@ -173,7 +177,7 @@ let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?getaddrinfo:(dns=
   in
   let timer_interval = Duration.to_f timer_interval in
   incr ctr;
-  let t = { waiters ; cancel_connecting ; he = happy_eyeballs ; dns ; timer_interval ; timer_condition ; counter = !ctr } in
+  let t = { waiters ; cancel_connecting ; he = happy_eyeballs ; getaddrinfo ; timer_interval ; timer_condition ; counter = !ctr } in
   Lwt.async (fun () -> timer t);
   t
 
