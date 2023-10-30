@@ -18,4 +18,5 @@ freebsd_task:
     - opam source dns-client
 
   build_script:
+    - opam install -y --deps-only -t dns dns-client dns-client-lwt dns-client-mirage
     - opam exec -- dune build -p happy-eyeballs,happy-eyeballs-lwt,happy-eyeballs-mirage,dns,dns-client,dns-client-lwt,dns-client-mirage
