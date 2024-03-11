@@ -13,7 +13,7 @@ depends: [
   "happy-eyeballs" {=version}
   "cmdliner" {>= "1.1.0"}
   "duration"
-  "dns-client-lwt" {>= "7.0.0"}
+  "dns" {>= "7.0.0"}
   "domain-name"
   "ipaddr"
   "fmt"
