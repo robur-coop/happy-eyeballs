@@ -1,4 +1,4 @@
 (library
  (name happy_eyeballs_mirage)
  (public_name happy-eyeballs-mirage)
- (libraries logs dns-client dns-client-mirage lwt tcpip happy-eyeballs))
+ (libraries logs duration dns-client dns-client-mirage domain-name ipaddr lwt fmt tcpip happy-eyeballs mirage-clock mirage-time))
