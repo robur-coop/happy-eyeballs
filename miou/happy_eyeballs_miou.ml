@@ -33,7 +33,7 @@ type action =
   [ `Connect_ip of state Atomic.t * addr list
   | `Connect of state Atomic.t * [ `host ] Domain_name.t * int list ]
 
-type connected = [ `Connected of entry * Miou_unix.file_descr ]
+type connected = [ `Connected of entry * Miou_unix.Ownership.file_descr ]
 
 type event =
   [ connected
@@ -90,21 +90,22 @@ let try_connect t ~meta addr () =
     match Unix.domain_of_sockaddr addr with
     | Unix.PF_UNIX ->
       let socket = Unix.socket ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0 in
-      Miou_unix.of_file_descr socket
-    | Unix.PF_INET -> Miou_unix.tcpv4 ()
-    | Unix.PF_INET6 -> Miou_unix.tcpv6 ()
+      Miou_unix.Ownership.of_file_descr socket
+    | Unix.PF_INET -> Miou_unix.Ownership.tcpv4 ()
+    | Unix.PF_INET6 -> Miou_unix.Ownership.tcpv6 ()
   in
   try
-    Miou_unix.connect socket addr;
+    Miou_unix.Ownership.connect socket addr;
     Logd.debug (fun m ->
         m "connected to %a (%d:%d)" pp_sockaddr addr (Obj.magic id) attempt);
+    Miou.Ownership.transfer (Miou_unix.Ownership.resource socket);
     Miou.Mutex.protect t.mutex @@ fun () ->
     Miou.Queue.enqueue t.queue (`Connected (meta, socket));
     Miou.Condition.signal t.condition
   with Unix.Unix_error (err, _, _) ->
     Logd.err (fun m ->
         m "error connecting to %a: %s" pp_sockaddr addr (Unix.error_message err));
-    Miou_unix.close socket;
+    Miou_unix.Ownership.close socket;
     let msg =
       Fmt.str "error connecting to %a: %s" pp_sockaddr addr
         (Unix.error_message err)
@@ -214,7 +215,17 @@ let to_event t = function
       List.iter
         (fun (att, prm) ->
           if att <> attempt then begin
-            Logd.debug (fun m -> m "cancel (%d:%d)" (Obj.magic id) attempt);
+            Logd.debug (fun m -> m "cancel (%d:%d)" (Obj.magic id) att);
+            (* NOTE(dinosaure): 2 situations exists about cancellation:
+               1) the given [prm] is fully resolved, this implies that the
+                  ownership transfer has been made and that the event
+                  [`Connected] has already been sent. This event will not find
+                  its associated [waiter] (as it has already been filled by this
+                  first current event) and we should [Miou.Ownership.close]
+                  properly.
+               2) the given [prm] is not yet finished, so cancellation will call
+                  the socket finalizer and it will be closed cleanly. By this
+                  way, we are sure that we don't have file-descriptor leaks. *)
             Miou.cancel prm
           end)
         (Option.value ~default:[] others);
@@ -225,14 +236,22 @@ let to_event t = function
       let () =
         match waiter with
         | None ->
-            Miou.Mutex.protect t.mutex @@ fun () ->
-            Miou.Queue.enqueue t.queue event;
-            Miou.Condition.signal t.condition
+            Logd.warn (fun m -> m "Loose a connected socket to %a (%a) (%d:%d)" Domain_name.pp host
+              pp_sockaddr (to_sockaddr addr) (Obj.magic id) attempt);
+            Miou_unix.Ownership.close fd
         | Some waiter ->
-            let connected = Connected (addr, Miou_unix.to_file_descr fd) in
+            (* NOTE(dinosaure): the task is suspended **before** [disown]. If a
+               cancellation appear, [disown] is **not** executed and Miou
+               properly close [fd]. If we are able to [disown], the
+               responsability to close the [fd] falls to the person who
+               requested the socket if we are able to transfer it. Otherwise,
+               we just [Unix.close]. *)
+            Miou.Ownership.disown (Miou_unix.Ownership.resource fd);
+            let fd = Miou_unix.Ownership.to_file_descr fd in
+            let connected = Connected (addr, fd) in
             let set = Atomic.compare_and_set waiter In_progress connected in
             Logd.debug (fun m -> m "file-descr transmitted? %b" set);
-            if not set then Miou_unix.close fd
+            if not set then Unix.close fd
       in
       Logd.debug (fun m ->
           m "connected to %a (%a) (%d:%d)" Domain_name.pp host pp_sockaddr
