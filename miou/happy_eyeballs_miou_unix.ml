@@ -207,7 +207,7 @@ let to_event t = function
       t.cancel_connecting <-
         Happy_eyeballs.Waiter_map.update id fold t.cancel_connecting;
       Happy_eyeballs.Connection_failed (host, id, addr, msg)
-  | `Connected ((id, attempt, host, addr), fd) as event ->
+  | `Connected ((id, attempt, host, addr), fd) ->
       let cancel_connecting, others =
         Happy_eyeballs.Waiter_map.find_and_remove id t.cancel_connecting
       in
@@ -328,6 +328,7 @@ let continue t cont he =
             (List.length events));
       let he, actions = to_actions t he user's_actions in
       (he, actions, events)
+  | Error Miou.Cancelled -> (he, [], [])
   | Error exn ->
       Logd.err (fun m ->
           m "Got an unexpected exception (suspend): %s" (Printexc.to_string exn));
@@ -437,7 +438,7 @@ type t = {
 type context =
   { fd : [ `Udp of Miou_unix.file_descr
          | `Tcp of Miou_unix.file_descr
-         | `Tls of Tls_miou.t ]
+         | `Tls of Tls_miou_unix.t ]
   ; timeout : float }
 
 let connect_to_nameservers t =
@@ -453,7 +454,7 @@ let connect_to_nameservers t =
     begin match List.find (same_address ipaddr port) t.nameservers with
     | `Plaintext _ -> addr, `Tcp (Miou_unix.of_file_descr fd)
     | `Tls (config, _, _) ->
-      try let fd = Tls_miou.client_of_fd config (Miou_unix.of_file_descr fd) in
+      try let fd = Tls_miou_unix.client_of_fd config (Miou_unix.of_file_descr fd) in
           (addr, `Tls fd)
       with exn -> Unix.close fd; raise exn end
   | `Udp ->
@@ -488,21 +489,21 @@ let rng = Mirage_crypto_rng.generate ?g:None
 
 let connect t =
   let ( >>= ) = Result.bind in
-  connect_to_nameservers t >>= fun (addr, fd) ->
-  Logc.debug (fun m -> m "Connected to a nameserver");
+  connect_to_nameservers t >>= fun ((addr, port), fd) ->
+  Logc.debug (fun m -> m "Connected to a nameserver %a:%d" Ipaddr.pp addr port);
   match fd with
   | `Tcp _ | `Tls _ -> Ok (`Tcp, { fd; timeout= t.timeout })
   | `Udp _ -> Ok (`Udp, { fd; timeout= t.timeout })
 
 let send_recv_tls ~timeout ~id fd str =
-  let send () = Tls_miou.write fd str in
+  let send () = Tls_miou_unix.write fd str in
   let recv () =
     let rec go buf rx_len =
       let expected_len =
         if rx_len >= 2 then Some (Bytes.get_uint16_be buf 0) else None in
       match expected_len with
       | None ->
-        let len = Tls_miou.read fd buf ~off:rx_len in
+        let len = Tls_miou_unix.read fd buf ~off:rx_len in
         if rx_len + len >= 2 && len > 0 then go buf (rx_len + len)
         else failwith "TLS connection closed by nameserver"
       | Some expected_len when rx_len >= expected_len + 2 ->
@@ -516,7 +517,7 @@ let send_recv_tls ~timeout ~id fd str =
           go buf' rx_len'
       | Some expected_len when Bytes.length buf >= expected_len + 2 ->
         let len = (expected_len + 2) - rx_len in
-        Tls_miou.really_read fd buf ~off:rx_len ~len;
+        Tls_miou_unix.really_read fd buf ~off:rx_len ~len;
         go buf (rx_len + len)
       | Some expected_len ->
         let buf' = Bytes.make (expected_len + 2) '\000' in
@@ -529,7 +530,7 @@ let send_recv_tls ~timeout ~id fd str =
   | Ok _ as rx -> rx
   | Error Timeout -> error_msgf "DNS request timeout"
   | Error (Failure msg) -> Error (`Msg msg)
-  | Error (End_of_file | Tls_miou.Closed_by_peer) ->
+  | Error (End_of_file | Tls_miou_unix.Closed_by_peer) ->
     error_msgf "End of file reading from nameserver"
   | Error exn ->
     error_msgf "Got an unexpected exception: %s"
@@ -574,7 +575,7 @@ let send_recv { fd; timeout } ({ Cstruct.len; _ } as tx) =
 
 let close { fd; _ } = match fd with
   | `Tcp fd | `Udp fd -> Miou_unix.close fd
-  | `Tls fd -> Tls_miou.close fd
+  | `Tls fd -> Tls_miou_unix.close fd
 
 let of_ns ns = Int64.to_float ns /. 1_000_000_000.
 
