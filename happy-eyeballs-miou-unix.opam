@@ -12,7 +12,7 @@ depends: [
   "dune" {>= "2.0.0"}
   "happy-eyeballs" {= version}
   "miou" {>= "0.1.0"}
-  "tls-miou"
+  "tls-miou-unix"
   "duration"
   "dns" {>= "7.0.0"}
   "dns-client" {>= "7.0.0"}
@@ -34,6 +34,6 @@ This uses Miou for side effects.
 """
 
 pin-depends: [
-  [ "miou.dev" "git+https://github.com/robur-coop/miou.git#9e14c3996326c28c3611b06f3cd758477fba4a1b" ]
-  [ "tls-miou.0.17.4" "git+https://github.com/dinosaure/ocaml-tls.git#c59f2fe51ccc6bd60a24b88077e655038f9321fe" ]
+  [ "miou.dev" "git+https://git.robur.coop/robur/miou.git#ed5087b832797616df073bd8ec9baed2ec4e474c" ]
+  [ "tls-miou-unix.0.17.4" "git+https://github.com/dinosaure/ocaml-tls.git#6b635d130b83bb45007e374d828f877332ab2b2e" ]
 ]
