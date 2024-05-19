@@ -10,15 +10,25 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 let now = Mtime_clock.elapsed_ns
 
+type getaddrinfo = [ `A | `AAAA ] -> [ `host ] Domain_name.t -> (Ipaddr.Set.t, [ `Msg of string ]) result Lwt.t
+
 type t = {
   mutable waiters : ((Ipaddr.t * int) * Lwt_unix.file_descr, [ `Msg of string ]) result Lwt.u Happy_eyeballs.Waiter_map.t ;
   mutable cancel_connecting : (int * unit Lwt.u) list Happy_eyeballs.Waiter_map.t;
   mutable he : Happy_eyeballs.t ;
-  dns : Dns_client_lwt.t ;
   timer_interval : float ;
   timer_condition : unit Lwt_condition.t ;
   counter : int ;
+  mutable getaddrinfo : getaddrinfo ;
 }
+
+let _cnt = ref 0
+
+let inject t getaddrinfo =
+  incr _cnt;
+  t.getaddrinfo <- getaddrinfo;
+  if !_cnt > 1 then
+    Log.warn (fun m -> m "inject was called the %u times" !_cnt)
 
 let safe_close fd =
   if Lwt_unix.state fd = Lwt_unix.Closed then
@@ -50,17 +60,34 @@ let rec act t action =
                 Happy_eyeballs.pp_action action);
   begin
     match action with
-    | Happy_eyeballs.Resolve_a host ->
+    | Happy_eyeballs.Resolve_a host | Happy_eyeballs.Resolve_aaaa host ->
       begin
-        Dns_client_lwt.getaddrinfo t.dns Dns.Rr_map.A host >|= function
-        | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_a (host, res))
-        | Error `Msg msg -> Ok (Happy_eyeballs.Resolved_a_failed (host, msg))
-      end
-    | Happy_eyeballs.Resolve_aaaa host ->
-      begin
-        Dns_client_lwt.getaddrinfo t.dns Dns.Rr_map.Aaaa host >|= function
-        | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_aaaa (host, res))
-        | Error `Msg msg -> Ok (Happy_eyeballs.Resolved_aaaa_failed (host, msg))
+        let record = match action with
+          | Happy_eyeballs.Resolve_a _ -> `A
+          | Happy_eyeballs.Resolve_aaaa _ -> `AAAA
+          | _ -> assert false (* never occur! *)
+        in
+        t.getaddrinfo record host >|= fun res ->
+        match res, record with
+        | Ok set, `A ->
+          let fold ip set = match ip with
+            | Ipaddr.V4 ipv4 -> Ipaddr.V4.Set.add ipv4 set
+            | Ipaddr.V6 ipv6 ->
+              Log.warn (fun m -> m "received the IPv6 address %a querying A of %a (ignoring)"
+                           Ipaddr.V6.pp ipv6 Domain_name.pp host);
+              set
+          in
+          Ok (Happy_eyeballs.Resolved_a (host, Ipaddr.Set.fold fold set Ipaddr.V4.Set.empty))
+        | Ok set, `AAAA ->
+          let fold ip set = match ip with
+            | Ipaddr.V6 ipv6 -> Ipaddr.V6.Set.add ipv6 set
+            | Ipaddr.V4 ipv4 ->
+              Log.warn (fun m -> m "received the IPv4 address %a querying AAAA of %a (ignoring)"
+                           Ipaddr.V4.pp ipv4 Domain_name.pp host);
+              set
+          in
+          Ok (Happy_eyeballs.Resolved_aaaa (host, Ipaddr.Set.fold fold set Ipaddr.V6.Set.empty))
+        | Error `Msg msg, _ -> Ok (Happy_eyeballs.Resolved_a_failed (host, msg))
       end
     | Happy_eyeballs.Connect (host, id, attempt, (ip, port)) ->
       begin
@@ -152,21 +179,36 @@ let rec timer t =
   loop ()
 
 let ctr = ref 0
+let error_msgf fmt = Fmt.kstr (fun msg -> Error (`Msg msg)) fmt
 
-let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?dns ?(timer_interval = Duration.of_ms 10) () =
-  let dns =
-    Option.value ~default:
-      (let timeout = Happy_eyeballs.resolve_timeout happy_eyeballs in
-       Dns_client_lwt.create ~timeout ())
-      dns
-  in
+let getaddrinfo record domain_name =
+  let open Lwt.Infix in
+  let getaddrinfo_option = match record with
+    | `A -> [ Unix.AI_FAMILY Unix.PF_INET ]
+    | `AAAA -> [ Unix.AI_FAMILY Unix.PF_INET6 ] in
+  let getaddrinfo_option = Unix.AI_SOCKTYPE Unix.SOCK_STREAM :: getaddrinfo_option in
+  Lwt.catch
+    (fun () -> Lwt_unix.getaddrinfo (Domain_name.to_string domain_name) "" getaddrinfo_option >|= fun r -> Ok r)
+    (fun exn -> Lwt.return (Error exn)) >|= function
+  | Error exn -> error_msgf "while resolving %a, ran into exception %s" Domain_name.pp domain_name
+                   (Printexc.to_string exn)
+  | Ok [] -> error_msgf "%a not found" Domain_name.pp domain_name
+  | Ok addrs ->
+    let set = List.fold_left (fun set { Unix.ai_addr; _ } -> match ai_addr with
+      | Unix.ADDR_INET (inet_addr, _) -> Ipaddr.Set.add (Ipaddr_unix.of_inet_addr inet_addr) set
+      | Unix.ADDR_UNIX _ -> set)
+      Ipaddr.Set.empty addrs in
+    Ok set
+
+let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?(getaddrinfo= getaddrinfo)
+  ?(timer_interval = Duration.of_ms 10) () =
   let waiters = Happy_eyeballs.Waiter_map.empty
   and cancel_connecting = Happy_eyeballs.Waiter_map.empty
   and timer_condition = Lwt_condition.create ()
   in
   let timer_interval = Duration.to_f timer_interval in
   incr ctr;
-  let t = { waiters ; cancel_connecting ; he = happy_eyeballs ; dns ; timer_interval ; timer_condition ; counter = !ctr } in
+  let t = { waiters ; cancel_connecting ; he = happy_eyeballs ; getaddrinfo ; timer_interval ; timer_condition ; counter = !ctr } in
   Lwt.async (fun () -> timer t);
   t
 
