@@ -1,3 +1,14 @@
+## v1.0.0 (2024-05-19)
+
+* Reverse dependency between dns-client-lwt and happy-eyeballs-lwt,
+  dns-client-mirage and happy-eyeballs-mirage (#38 @dinosaure)
+  This now has a new function `inject` to put a name resolver `getaddrinfo`
+  into action. The default for happy-eyeballs-lwt is Lwt_unix.getaddrinfo.
+  For happy-eyeballs-mirage, there is no default.
+* Update timestamp when a fresh connection attempt is done (#37 @hannesm)
+* Log message: prepend with counter to distinguish multiple happy-eyeballs
+  instaces (#36 @hannesm)
+
 ## v0.6.0 (2023-06-15)
 
 * Fix connection establishment: parallelize connection attempts, deal with
