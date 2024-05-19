@@ -44,9 +44,8 @@ val inject : t -> getaddrinfo -> unit
 
     {[
       let _ =
-        let happy_eyeballs = Happy_eyeballs_lwt.create () in
         let dns = Dns_client_lwt.create () in
-        Happy_eyeballs_lwt.inject happy_eyeballs (Dns_client_lwt.getaddrinfo dns);
+        let happy_eyeballs = Dns_client_lwt.create_happy_eyeballs dns in
         Happy_eyeballs_lwt.connect happy_eyeballs "robur.coop" [ 443 ]
         >>= function
         | Ok (_, fd) -> ...
