@@ -1,14 +1,14 @@
 module type S = sig
-  module Transport : Dns_client.S
-    with type io_addr = [ `Plaintext of Ipaddr.t * int  | `Tls of Tls.Config.client * Ipaddr.t * int ]
-     and type +'a io = 'a Lwt.t
-
   type t
-  type dns
+  type stack
   type flow
 
+  type getaddrinfo = [ `A | `AAAA ] -> [ `host ] Domain_name.t -> (Ipaddr.Set.t, [ `Msg of string ]) result Lwt.t
+
   val create : ?happy_eyeballs:Happy_eyeballs.t ->
-    ?dns:dns -> ?timer_interval:int64 -> Transport.stack -> t
+    ?getaddrinfo:getaddrinfo -> ?timer_interval:int64 -> stack -> t
+
+  val inject : t -> getaddrinfo -> unit
 
   val connect_host : t -> [`host] Domain_name.t -> int list ->
     ((Ipaddr.t * int) * flow, [> `Msg of string ]) result Lwt.t
@@ -32,25 +32,22 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 let ctr = ref 0
 
-module Make (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) (S : Tcpip.Stack.V4V6)
-  (DNS : Dns_client_mirage.S with type Transport.stack = S.t) : sig
+module Make (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) (S : Tcpip.Stack.V4V6) : sig
   include S
-    with module Transport = DNS.Transport
-     and type dns = DNS.t
-     and type flow = S.TCP.flow
+    with type flow = S.TCP.flow
+     and type stack = S.t
 
-  (* note: the v6_connect_timeout is kept until 1.0.0 since it is referenced in mirage *)
   val connect_device : ?aaaa_timeout:int64 -> ?connect_delay:int64 ->
-    ?v6_connect_timeout:int64 -> ?connect_timeout:int64 -> ?resolve_timeout:int64 -> ?resolve_retries:int ->
-    ?timer_interval:int64 -> dns -> Transport.stack -> t Lwt.t
+    ?connect_timeout:int64 -> ?resolve_timeout:int64 -> ?resolve_retries:int ->
+    ?timer_interval:int64 -> ?getaddrinfo:getaddrinfo -> stack -> t Lwt.t
 end = struct
-  module Transport = DNS.Transport
-  type dns = DNS.t
+  type stack = S.t
 
   type flow = S.TCP.flow
 
+  type getaddrinfo = [ `A | `AAAA ] -> [ `host ] Domain_name.t -> (Ipaddr.Set.t, [ `Msg of string ]) result Lwt.t
+
   type t = {
-    dns : DNS.t ;
     stack : S.t ;
     mutable waiters : ((Ipaddr.t * int) * S.TCP.flow, [ `Msg of string ]) result Lwt.u Happy_eyeballs.Waiter_map.t ;
     mutable cancel_connecting : (int * unit Lwt.u) list Happy_eyeballs.Waiter_map.t;
@@ -58,7 +55,16 @@ end = struct
     timer_interval : int64 ;
     timer_condition : unit Lwt_condition.t ;
     counter : int ;
+    mutable getaddrinfo : getaddrinfo option ;
   }
+
+  let _cnt = ref 0
+
+  let inject t getaddrinfo =
+    incr _cnt;
+    t.getaddrinfo <- Some getaddrinfo;
+    if !_cnt > 1 then
+      Log.warn (fun m -> m "inject was called the %u times" !_cnt)
 
   let try_connect stack addr =
     let open Lwt.Infix in
@@ -72,17 +78,40 @@ end = struct
                   Happy_eyeballs.pp_action action);
     begin
       match action with
-      | Happy_eyeballs.Resolve_a host ->
+      | Happy_eyeballs.Resolve_a host | Happy_eyeballs.Resolve_aaaa host ->
         begin
-          DNS.getaddrinfo t.dns Dns.Rr_map.A host >|= function
-          | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_a (host, res))
-          | Error `Msg msg -> Ok (Happy_eyeballs.Resolved_a_failed (host, msg))
-        end
-      | Happy_eyeballs.Resolve_aaaa host ->
-        begin
-          DNS.getaddrinfo t.dns Dns.Rr_map.Aaaa host >|= function
-          | Ok (_, res) -> Ok (Happy_eyeballs.Resolved_aaaa (host, res))
-          | Error `Msg msg -> Ok (Happy_eyeballs.Resolved_aaaa_failed (host, msg))
+          let record = match action with
+            | Happy_eyeballs.Resolve_a _ -> `A
+            | Happy_eyeballs.Resolve_aaaa _ -> `AAAA
+            | _ -> assert false (* never occur! *)
+          in
+          match t.getaddrinfo with
+          | None ->
+            Log.err (fun m -> m "trying to lookup %a, but there's no getaddrinfo"
+                        Domain_name.pp host);
+            Lwt.return (Error ())
+          | Some getaddrinfo ->
+            getaddrinfo record host >|= fun res ->
+            match res, record with
+            | Ok set, `A ->
+              let fold ip set = match ip with
+                | Ipaddr.V4 ipv4 -> Ipaddr.V4.Set.add ipv4 set
+                | Ipaddr.V6 ipv6 ->
+                  Log.warn (fun m -> m "received the IPv6 address %a querying A of %a (ignoring)"
+                               Ipaddr.V6.pp ipv6 Domain_name.pp host);
+                  set
+              in
+              Ok (Happy_eyeballs.Resolved_a (host, Ipaddr.Set.fold fold set Ipaddr.V4.Set.empty))
+            | Ok set, `AAAA ->
+              let fold ip set = match ip with
+                | Ipaddr.V6 ipv6 -> Ipaddr.V6.Set.add ipv6 set
+                | Ipaddr.V4 ipv4 ->
+                  Log.warn (fun m -> m "received the IPv4 address %a querying AAAA of %a (ignoring)"
+                               Ipaddr.V4.pp ipv4 Domain_name.pp host);
+                  set
+              in
+              Ok (Happy_eyeballs.Resolved_aaaa (host, Ipaddr.Set.fold fold set Ipaddr.V6.Set.empty))
+            | Error `Msg msg, _ -> Ok (Happy_eyeballs.Resolved_a_failed (host, msg))
         end
       | Happy_eyeballs.Connect (host, id, attempt, addr) ->
         begin
@@ -173,18 +202,13 @@ end = struct
     Lwt_condition.wait t.timer_condition >>= fun () ->
     loop ()
 
-  let create ?(happy_eyeballs = Happy_eyeballs.create (C.elapsed_ns ())) ?dns ?(timer_interval = Duration.of_ms 10) stack =
-    let dns =
-      Option.value ~default:
-        (let timeout = Happy_eyeballs.resolve_timeout happy_eyeballs in
-         DNS.create ~timeout stack)
-        dns
-    and waiters = Happy_eyeballs.Waiter_map.empty
+  let create ?(happy_eyeballs = Happy_eyeballs.create (C.elapsed_ns ())) ?getaddrinfo ?(timer_interval = Duration.of_ms 10) stack =
+    let waiters = Happy_eyeballs.Waiter_map.empty
     and cancel_connecting = Happy_eyeballs.Waiter_map.empty
     and timer_condition = Lwt_condition.create ()
     in
     incr ctr;
-    let t = { dns ; stack ; waiters ; cancel_connecting ; he = happy_eyeballs ; timer_interval ; timer_condition ; counter = !ctr } in
+    let t = { stack ; waiters ; cancel_connecting ; he = happy_eyeballs ; timer_interval ; timer_condition ; counter = !ctr ; getaddrinfo } in
     Lwt.async (fun () -> timer t);
     t
 
@@ -239,13 +263,12 @@ end = struct
         (Result.bind (Domain_name.of_string host) Domain_name.host) >>= fun h ->
       connect_host t h ports
 
-  (* note: the v6_connect_timeout is kept until 1.0.0 since it is referenced in mirage *)
-  let connect_device ?aaaa_timeout ?connect_delay ?v6_connect_timeout:_ ?connect_timeout
-    ?resolve_timeout ?resolve_retries ?timer_interval dns stack =
+  let connect_device ?aaaa_timeout ?connect_delay ?connect_timeout
+    ?resolve_timeout ?resolve_retries ?timer_interval ?getaddrinfo stack =
     let happy_eyeballs =
       Happy_eyeballs.create ?aaaa_timeout ?connect_delay ?connect_timeout
         ?resolve_timeout ?resolve_retries (C.elapsed_ns ())
     in
-    let happy_eyeballs = create ~happy_eyeballs ~dns ?timer_interval stack in
+    let happy_eyeballs = create ~happy_eyeballs ?getaddrinfo ?timer_interval stack in
     Lwt.return happy_eyeballs
 end

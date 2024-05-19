@@ -1,14 +1,20 @@
 module type S = sig
-  module Transport : Dns_client.S
-    with type io_addr = [ `Plaintext of Ipaddr.t * int  | `Tls of Tls.Config.client * Ipaddr.t * int ]
-     and type +'a io = 'a Lwt.t
-
   type t
-  type dns
+
+  type stack
+
   type flow
 
+  type getaddrinfo = [ `A | `AAAA ] -> [ `host ] Domain_name.t -> (Ipaddr.Set.t, [ `Msg of string ]) result Lwt.t
+
   val create : ?happy_eyeballs:Happy_eyeballs.t ->
-    ?dns:dns -> ?timer_interval:int64 -> Transport.stack -> t
+    ?getaddrinfo:getaddrinfo -> ?timer_interval:int64 -> stack -> t
+
+  val inject : t -> getaddrinfo -> unit
+  (** [inject t getaddrinfo] injects a {i new} domain-name resolver into the
+      given happy-eyeballs instance. By default, the happy-eyeballs instance is
+      not able to resolve hostnames. Use a [dns-client-mirage] instance at your
+      convenience. *)
 
   val connect_host : t -> [`host] Domain_name.t -> int list ->
     ((Ipaddr.t * int) * flow, [> `Msg of string ]) result Lwt.t
@@ -20,15 +26,12 @@ module type S = sig
     ((Ipaddr.t * int) * flow, [> `Msg of string ]) result Lwt.t
 end
 
-module Make (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) (S : Tcpip.Stack.V4V6)
-  (DNS : Dns_client_mirage.S with type Transport.stack = S.t) : sig
+module Make (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) (S : Tcpip.Stack.V4V6) : sig
   include S
-   with module Transport = DNS.Transport
-    and type dns = DNS.t
-    and type flow = S.TCP.flow
+    with type flow = S.TCP.flow
+     and type stack = S.t
 
-  (* note: the v6_connect_timeout is kept until 1.0.0 since it is referenced in mirage *)
   val connect_device : ?aaaa_timeout:int64 -> ?connect_delay:int64 ->
-    ?v6_connect_timeout:int64 -> ?connect_timeout:int64 -> ?resolve_timeout:int64 -> ?resolve_retries:int ->
-    ?timer_interval:int64 -> dns -> Transport.stack -> t Lwt.t
+    ?connect_timeout:int64 -> ?resolve_timeout:int64 -> ?resolve_retries:int ->
+    ?timer_interval:int64 -> ?getaddrinfo:getaddrinfo -> stack -> t Lwt.t
 end

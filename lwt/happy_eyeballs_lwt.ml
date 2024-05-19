@@ -24,7 +24,7 @@ type t = {
 
 let _cnt = ref 0
 
-let inject getaddrinfo t =
+let inject t getaddrinfo =
   incr _cnt;
   t.getaddrinfo <- getaddrinfo;
   if !_cnt > 1 then
