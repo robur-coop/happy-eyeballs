@@ -22,8 +22,13 @@ type t = {
   mutable getaddrinfo : getaddrinfo ;
 }
 
+let _cnt = ref 0
+
 let inject getaddrinfo t =
-  t.getaddrinfo <- getaddrinfo
+  incr _cnt;
+  t.getaddrinfo <- getaddrinfo;
+  if !_cnt > 1 then
+    Log.warn (fun m -> m "inject was called the %u times" !_cnt)
 
 let safe_close fd =
   if Lwt_unix.state fd = Lwt_unix.Closed then
@@ -51,7 +56,6 @@ let try_connect ip port =
 
 let rec act t action =
   let open Lwt.Infix in
-  let ( >>? ) = Lwt_result.bind in
   Log.debug (fun m -> m "[%u] action %a" t.counter
                 Happy_eyeballs.pp_action action);
   begin
@@ -61,18 +65,27 @@ let rec act t action =
         let record = match action with
           | Happy_eyeballs.Resolve_a _ -> `A
           | Happy_eyeballs.Resolve_aaaa _ -> `AAAA
-          | _ -> assert false (* never occur! *) in
-        Lwt.return (Domain_name.host host) >>?
-        t.getaddrinfo record >|= fun res -> match res, record with
+          | _ -> assert false (* never occur! *)
+        in
+        t.getaddrinfo record host >|= fun res ->
+        match res, record with
         | Ok set, `A ->
           let fold ip set = match ip with
             | Ipaddr.V4 ipv4 -> Ipaddr.V4.Set.add ipv4 set
-            | _ -> set in
+            | Ipaddr.V6 ipv6 ->
+              Log.warn (fun m -> m "received the IPv6 address %a querying A of %a (ignoring)"
+                           Ipaddr.V6.pp ipv6 Domain_name.pp host);
+              set
+          in
           Ok (Happy_eyeballs.Resolved_a (host, Ipaddr.Set.fold fold set Ipaddr.V4.Set.empty))
         | Ok set, `AAAA ->
           let fold ip set = match ip with
             | Ipaddr.V6 ipv6 -> Ipaddr.V6.Set.add ipv6 set
-            | _ -> set in
+            | Ipaddr.V4 ipv4 ->
+              Log.warn (fun m -> m "received the IPv4 address %a querying AAAA of %a (ignoring)"
+                           Ipaddr.V4.pp ipv4 Domain_name.pp host);
+              set
+          in
           Ok (Happy_eyeballs.Resolved_aaaa (host, Ipaddr.Set.fold fold set Ipaddr.V6.Set.empty))
         | Error `Msg msg, _ -> Ok (Happy_eyeballs.Resolved_a_failed (host, msg))
       end
@@ -175,10 +188,12 @@ let getaddrinfo record domain_name =
     | `AAAA -> [ Unix.AI_FAMILY Unix.PF_INET6 ] in
   let getaddrinfo_option = Unix.AI_SOCKTYPE Unix.SOCK_STREAM :: getaddrinfo_option in
   Lwt.catch
-    (fun () -> Lwt_unix.getaddrinfo (Domain_name.to_string domain_name) "" getaddrinfo_option)
-    (fun exn -> Lwt.return []) >|= function
-  | [] -> error_msgf "%a not found" Domain_name.pp domain_name
-  | addrs ->
+    (fun () -> Lwt_unix.getaddrinfo (Domain_name.to_string domain_name) "" getaddrinfo_option >|= fun r -> Ok r)
+    (fun exn -> Lwt.return (Error exn)) >|= function
+  | Error exn -> error_msgf "while resolving %a, ran into exception %s" Domain_name.pp domain_name
+                   (Printexc.to_string exn)
+  | Ok [] -> error_msgf "%a not found" Domain_name.pp domain_name
+  | Ok addrs ->
     let set = List.fold_left (fun set { Unix.ai_addr; _ } -> match ai_addr with
       | Unix.ADDR_INET (inet_addr, _) -> Ipaddr.Set.add (Ipaddr_unix.of_inet_addr inet_addr) set
       | Unix.ADDR_UNIX _ -> set)
