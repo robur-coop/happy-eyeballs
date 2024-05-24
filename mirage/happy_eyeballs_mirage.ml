@@ -10,13 +10,18 @@ module type S = sig
 
   val inject : t -> getaddrinfo -> unit
 
-  val connect_host : t -> [`host] Domain_name.t -> int list ->
+  val connect_host : t -> ?aaaa_timeout:int64 -> ?connect_delay:int64 ->
+    ?connect_timeout:int64 -> ?resolve_timeout:int64 -> ?resolve_retries:int ->
+    [`host] Domain_name.t -> int list ->
     ((Ipaddr.t * int) * flow, [> `Msg of string ]) result Lwt.t
 
-  val connect_ip : t -> (Ipaddr.t * int) list ->
+  val connect_ip : t -> ?aaaa_timeout:int64 -> ?connect_delay:int64 ->
+    ?connect_timeout:int64 -> (Ipaddr.t * int) list ->
     ((Ipaddr.t * int) * flow, [> `Msg of string ]) result Lwt.t
 
-  val connect : t -> string -> int list ->
+  val connect : t -> ?aaaa_timeout:int64 -> ?connect_delay:int64 ->
+    ?connect_timeout:int64 -> ?resolve_timeout:int64 -> ?resolve_retries:int ->
+    string -> int list ->
     ((Ipaddr.t * int) * flow, [> `Msg of string ]) result Lwt.t
 end
 
@@ -219,12 +224,16 @@ end = struct
     | Ok _ as r -> r
     | Error (`Msg _) as r -> r
 
-  let connect_host t host ports =
+  let connect_host t ?aaaa_timeout ?connect_delay ?connect_timeout
+    ?resolve_timeout ?resolve_retries host ports =
     let waiter, notify = Lwt.task () in
     let waiters, id = Happy_eyeballs.Waiter_map.register notify t.waiters in
     t.waiters <- waiters;
     let ts = C.elapsed_ns () in
-    let he, actions = Happy_eyeballs.connect t.he ts ~id host ports in
+    let he, actions =
+      Happy_eyeballs.connect t.he ts ?aaaa_timeout ?connect_delay
+        ?connect_timeout ?resolve_timeout ?resolve_retries ~id host ports
+    in
     t.he <- he;
     Lwt_condition.signal t.timer_condition ();
     handle_actions t actions;
@@ -236,12 +245,15 @@ end = struct
                   Duration.pp (Int64.sub (C.elapsed_ns ()) ts));
     open_msg_error r
 
-  let connect_ip t addresses =
+  let connect_ip t ?aaaa_timeout ?connect_delay ?connect_timeout addresses =
     let waiter, notify = Lwt.task () in
     let waiters, id = Happy_eyeballs.Waiter_map.register notify t.waiters in
     t.waiters <- waiters;
     let ts = C.elapsed_ns () in
-    let he, actions = Happy_eyeballs.connect_ip t.he ts ~id addresses in
+    let he, actions =
+      Happy_eyeballs.connect_ip t.he ts ?aaaa_timeout ?connect_delay
+        ?connect_timeout ~id addresses
+    in
     t.he <- he;
     Lwt_condition.signal t.timer_condition ();
     handle_actions t actions;
@@ -254,14 +266,18 @@ end = struct
                   Duration.pp (Int64.sub (C.elapsed_ns ()) ts));
     open_msg_error r
 
-  let connect t host ports =
+  let connect t ?aaaa_timeout ?connect_delay ?connect_timeout
+    ?resolve_timeout ?resolve_retries host ports =
     match Ipaddr.of_string host with
-    | Ok ip -> connect_ip t (List.map (fun p -> (ip, p)) ports)
+    | Ok ip ->
+      connect_ip t ?aaaa_timeout ?connect_delay ?connect_timeout
+        (List.map (fun p -> (ip, p)) ports)
     | Error _ ->
       let open Lwt_result.Infix in
       Lwt_result.lift
         (Result.bind (Domain_name.of_string host) Domain_name.host) >>= fun h ->
-      connect_host t h ports
+      connect_host t ?aaaa_timeout ?connect_delay ?connect_timeout
+        ?resolve_timeout ?resolve_retries h ports
 
   let connect_device ?aaaa_timeout ?connect_delay ?connect_timeout
     ?resolve_timeout ?resolve_retries ?timer_interval ?getaddrinfo stack =
