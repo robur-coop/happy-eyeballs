@@ -47,20 +47,25 @@ val timer : t -> int64 -> t * [ `Suspend | `Act ] * action list
     If the timer thread has been suspended it should be signalled to resume
     after calling [connect] or [connect_ip]. *)
 
-val connect : t -> int64 -> id:id -> [`host] Domain_name.t -> int list ->
-  t * action list
-(** [connect t ts ~id host ports] attempts a connection to [host], where the
-    [ports] are attempted in sequence. It results in an updated [t] and a list
-    of actions to be performed.
+val connect : t -> int64 -> ?aaaa_timeout:int64 -> ?connect_delay:int64 ->
+  ?connect_timeout:int64 -> ?resolve_timeout:int64 -> ?resolve_retries:int ->
+  id:id -> [`host] Domain_name.t -> int list -> t * action list
+(** [connect t ts ~aaaa_timeout ~connect_delay ~connect_timeout ~resolve_timeout ~resolve_retries ~id host ports]
+    attempts a connection to [host], where the [ports] are attempted in
+    sequence. It results in an updated [t] and a list of actions to be
+    performed. The timeouts and delays are specified in nanoseconds, and default
+    to the value provided when {!create} was executed.
 
     @raise Failure if [ports] is the empty list. *)
 
-val connect_ip : t -> int64 -> id:id -> (Ipaddr.t * int) list ->
-  t * action list
-(** [connect_ip t ts ~id addresses] attempts a connection to [addresses]. By
-    default, the list will be tried in sequence. The ports will be tried in
-    sequence.  The result is an updated [t] and a list of actions to be
-    performed.
+val connect_ip : t -> int64 -> ?aaaa_timeout:int64 -> ?connect_delay:int64 ->
+  ?connect_timeout:int64 -> id:id -> (Ipaddr.t * int) list -> t * action list
+(** [connect_ip t ts ~aaaa_timeout ~connect_delay ~connect_timeout ~id addresses]
+    attempts a connection to
+    [addresses]. By default, the list will be tried in sequence. The ports will
+    be tried in sequence. The result is an updated [t] and a list of actions to
+    be performed. The timeouts and delays are specified in nanoseconds, and
+    default to the values provided when {!create} was executed.
 
     @raise Failure if [addresses] is the empty list. *)
 

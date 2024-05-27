@@ -2,17 +2,25 @@ let src = Logs.Src.create "happy-eyeballs" ~doc:"Happy Eyeballs"
 module Log = (val Logs.src_log src : Logs.LOG)
 
 type conn_state =
-  | Resolving
+  | Resolving of int64
   | Waiting_for_aaaa of int64 * Ipaddr.V4.Set.t (* TODO ensure non-empty set *)
   | Connecting of int64 * (Ipaddr.t * int) list * (Ipaddr.t * int) list
 
-type connection = {
+type timeouts = {
   created : int64 ;
+  aaaa_timeout : int64 ;
+  connect_delay : int64 ;
+  connect_timeout : int64 ;
+  resolve_timeout : int64 ;
+}
+
+type connection = {
   state : conn_state ;
   ports : int list ;
   resolved : [ `none | `v4 | `v6 | `both ] ;
   resolve_left : int ;
   attempt : int ;
+  time : timeouts ;
 }
 
 let resolve st ev = match st, ev with
@@ -25,17 +33,13 @@ let resolve st ev = match st, ev with
 module IM = Map.Make(Int)
 
 type t = {
-  aaaa_timeout : int64 ;
-  connect_delay : int64 ;
-  connect_timeout : int64 ;
-  resolve_timeout : int64 ;
-  started : int64 ;
   resolve_retries : int ;
   counter : int ;
   conns : connection IM.t Domain_name.Host_map.t ;
+  time : timeouts ;
 }
 
-let resolve_timeout t = t.resolve_timeout
+let resolve_timeout t = t.time.resolve_timeout
 
 type id = int
 
@@ -95,17 +99,20 @@ let create
     ?(connect_timeout = Duration.of_sec 10)
     ?(resolve_timeout = Duration.of_sec 1)
     ?(resolve_retries = 3)
-    started =
+    created =
   incr ctr;
-  {
+  let time = {
     aaaa_timeout ;
     connect_delay ;
     connect_timeout ;
     resolve_timeout ;
+    created ;
+  } in
+  {
     resolve_retries ;
-    started ;
     counter = !ctr ;
     conns = Domain_name.Host_map.empty ;
+    time ;
   }
 
 let add_conn host id conn c =
@@ -124,12 +131,12 @@ let expand_list_split ips ports =
   | hd :: tl -> hd, tl
   | _ -> failwith "ips or ports are empty"
 
-let tick t now host id conn =
+let tick now host id conn =
   match conn.state with
-  | Resolving when Int64.sub now conn.created > t.resolve_timeout ->
+  | Resolving ts when Int64.sub now ts > conn.time.resolve_timeout ->
     begin
       let ok actions =
-        Ok ({ conn with created = now ; resolve_left = conn.resolve_left - 1 },
+        Ok ({ conn with resolve_left = conn.resolve_left - 1 },
             actions)
       in
       match conn.resolve_left <= 1, conn.resolved with
@@ -138,7 +145,7 @@ let tick t now host id conn =
       | false, `v4 -> ok [ Resolve_aaaa host ]
       | false, `v6 -> ok [ Resolve_a host ]
     end
-  | Waiting_for_aaaa (started, ips) when Int64.sub now started > t.aaaa_timeout ->
+  | Waiting_for_aaaa (started, ips) when Int64.sub now started > conn.time.aaaa_timeout ->
     let ips = List.map (fun ip -> Ipaddr.V4 ip) (Ipaddr.V4.Set.elements ips) in
     let dst, dsts = expand_list_split ips conn.ports in
     let state = Connecting (now, [ dst ], dsts)
@@ -148,9 +155,9 @@ let tick t now host id conn =
   | Connecting (last_conn, active_conns, dsts) ->
     (* if there are further IP addresses, and there was no activity within
        connect_delay, start the next connection. *)
-    if Int64.sub now conn.created > t.connect_timeout then
+    if Int64.sub now conn.time.created > conn.time.connect_timeout then
       Error ()
-    else if Int64.sub now last_conn > t.connect_delay then
+    else if Int64.sub now last_conn > conn.time.connect_delay then
       (match dsts with
        | [] -> Ok (conn, [])
        | dst :: dsts ->
@@ -162,11 +169,11 @@ let tick t now host id conn =
       Ok (conn, [])
   | _ -> Ok (conn, [])
 
-let timer t now =
+let timer (t : t) now =
   let conns, actions =
     Domain_name.Host_map.fold (fun host v (dm, actions) ->
         let v, actions = IM.fold (fun id conn (acc, actions) ->
-            match tick t now host id conn with
+            match tick now host id conn with
             | Ok (conn, action) -> IM.add id conn acc, action @ actions
             | Error () -> acc, Connect_failed (host, id, "timeout") :: actions)
             v (IM.empty, actions)
@@ -187,17 +194,27 @@ let timer t now =
   (if Domain_name.Host_map.is_empty conns then `Suspend else `Act),
   actions
 
-let connect t now ~id host ports =
+let connect t now ?aaaa_timeout ?connect_delay ?connect_timeout ?resolve_timeout ?resolve_retries ~id host ports =
   Log.debug (fun m -> m "[%u] connect: id %d host %a" t.counter id
                 Domain_name.pp host);
   if ports = [] then failwith "empty port list not supported";
-  let conn = {
+  let tt = t.time in
+  let time = {
     created = now ;
+    aaaa_timeout = Option.value ~default:tt.aaaa_timeout aaaa_timeout ;
+    connect_delay = Option.value ~default:tt.connect_delay connect_delay ;
+    connect_timeout = Option.value ~default:tt.connect_timeout connect_timeout ;
+    resolve_timeout = Option.value ~default:tt.resolve_timeout resolve_timeout ;
+  }
+  in
+  let resolve_left = Option.value ~default:t.resolve_retries resolve_retries in
+  let conn = {
     ports ;
-    state = Resolving ;
+    state = Resolving now ;
     resolved = `none ;
-    resolve_left = t.resolve_retries ;
+    resolve_left ;
     attempt = 0 ;
+    time ;
   } in
   let actions = [ Resolve_aaaa host ; Resolve_a host ] in
   Log.debug (fun m -> m "[%u] actions: %a" t.counter
@@ -259,7 +276,7 @@ let mix_dsts ?(ipv4 = Ipaddr.V4.Set.empty) ?(ipv6 = Ipaddr.V6.Set.empty) ports d
   let first = match dst with [] -> None | (ip, _) :: _ -> Some ip in
   shuffle ?first (List.rev v4_dsts @ v4s) (List.rev v6_dsts @ v6s)
 
-let connect_ip t now ~id dsts =
+let connect_ip t now ?aaaa_timeout ?connect_delay ?connect_timeout ~id dsts =
   Log.debug (fun m -> m "[%u] connect_ip id %d dsts %a" t.counter id
                 Fmt.(list ~sep:(any ", ") (pair ~sep:(any ":") Ipaddr.pp int))
                 dsts);
@@ -268,13 +285,22 @@ let connect_ip t now ~id dsts =
     | [] -> failwith "addresses are empty"
   in
   let state = Connecting (now, [ dst ], dsts) in
-  let conn = {
+  let tt = t.time in
+  let time = {
     created = now ;
+    aaaa_timeout = Option.value ~default:tt.aaaa_timeout aaaa_timeout ;
+    connect_delay = Option.value ~default:tt.connect_delay connect_delay ;
+    connect_timeout = Option.value ~default:tt.connect_timeout connect_timeout ;
+    resolve_timeout = 0L
+  }
+  in
+  let conn = {
     ports = [] ;
     state ;
     resolved = `both ;
     resolve_left = 0 ;
     attempt = 1 ;
+    time ;
   } in
   let host = Ipaddr.to_domain_name (fst dst) in
   let actions = [ Connect (host, id, 0, dst) ] in
@@ -294,14 +320,14 @@ let event t now e =
           let cs, actions = IM.fold (fun id c (cs, actions) ->
               let resolved = resolve c.resolved `v4 in
               let state, attempt, actions = match c.state with
-                | Resolving when resolved = `both ->
+                | Resolving _ts when resolved = `both ->
                   let ips =
                     List.map (fun ip -> Ipaddr.V4 ip) (Ipaddr.V4.Set.elements ips)
                   in
                   let dst, dsts = expand_list_split ips c.ports in
                   Connecting (now, [ dst ], dsts), c.attempt + 1,
                   Connect (name, id, c.attempt, dst) :: actions
-                | Resolving -> Waiting_for_aaaa (now, ips), c.attempt, actions
+                | Resolving _ts -> Waiting_for_aaaa (now, ips), c.attempt, actions
                 | Waiting_for_aaaa (ts, ips') ->
                   Logs.warn (fun m -> m "already waiting for AAAA with %a"
                                 Fmt.(list ~sep:(any ", ") Ipaddr.V4.pp)
@@ -326,7 +352,7 @@ let event t now e =
           let cs, actions = IM.fold (fun id c (cs, actions) ->
               let resolved = resolve c.resolved `v4 in
               match c.state with
-              | Resolving when resolved = `both ->
+              | Resolving _ts when resolved = `both ->
                 cs, Connect_failed (name, id, reason) :: actions
               | _ -> IM.add id { c with resolved } cs, actions)
               cs (IM.empty, [])
@@ -345,7 +371,7 @@ let event t now e =
           let cs, actions = IM.fold (fun id c (cs, actions) ->
               let resolved = resolve c.resolved `v6 in
               let state, attempt, actions' = match c.state with
-                | Resolving ->
+                | Resolving _ts ->
                   let ips = mix ~ipv6:ips [] in
                   let dst, dsts = expand_list_split ips c.ports in
                   Connecting (now, [ dst ], dsts), c.attempt + 1,
@@ -373,7 +399,7 @@ let event t now e =
           let cs, actions = IM.fold (fun id c (cs, actions) ->
               let resolved = resolve c.resolved `v6 in
               match c.state with
-              | Resolving when resolved = `both ->
+              | Resolving _ts when resolved = `both ->
                 cs, Connect_failed (name, id, reason) :: actions
               | Waiting_for_aaaa (_ts, ips) ->
                 let ips =
@@ -417,7 +443,7 @@ let event t now e =
                   Domain_name.Host_map.add name cs t.conns,
                   [ Connect_failed (name, id, reason) ]
                 | [], _ ->
-                  let state = Resolving in
+                  let state = Resolving now in
                   let cs = IM.add id { c with state } cs in
                   Domain_name.Host_map.add name cs t.conns, []
                 | dst', _ ->

@@ -215,12 +215,16 @@ let create ?(happy_eyeballs = Happy_eyeballs.create (now ())) ?(getaddrinfo= get
 let handle_actions t actions =
   List.iter (fun a -> Lwt.async (fun () -> act t a)) actions
 
-let connect_host t host ports =
+let connect_host t ?aaaa_timeout ?connect_delay ?connect_timeout
+    ?resolve_timeout ?resolve_retries host ports =
   let waiter, notify = Lwt.task () in
   let waiters, id = Happy_eyeballs.Waiter_map.register notify t.waiters in
   t.waiters <- waiters;
   let ts = now () in
-  let he, actions = Happy_eyeballs.connect t.he ts ~id host ports in
+  let he, actions =
+    Happy_eyeballs.connect t.he ts ?aaaa_timeout ?connect_delay ?connect_timeout
+      ?resolve_timeout ?resolve_retries ~id host ports
+  in
   t.he <- he;
   Lwt_condition.signal t.timer_condition ();
   handle_actions t actions;
@@ -231,12 +235,15 @@ let connect_host t host ports =
                 Domain_name.pp host Duration.pp (Int64.sub (now ()) ts));
   r
 
-let connect_ip t addresses =
+let connect_ip t ?aaaa_timeout ?connect_delay ?connect_timeout addresses =
   let waiter, notify = Lwt.task () in
   let waiters, id = Happy_eyeballs.Waiter_map.register notify t.waiters in
   t.waiters <- waiters;
   let ts = now () in
-  let he, actions = Happy_eyeballs.connect_ip t.he ts ~id addresses in
+  let he, actions =
+    Happy_eyeballs.connect_ip t.he ts ?aaaa_timeout ?connect_delay
+      ?connect_timeout ~id addresses
+  in
   t.he <- he;
   Lwt_condition.signal t.timer_condition ();
   handle_actions t actions;
@@ -249,11 +256,15 @@ let connect_ip t addresses =
                 Duration.pp (Int64.sub (now ()) ts));
   r
 
-let connect t host ports =
+let connect t ?aaaa_timeout ?connect_delay ?connect_timeout
+    ?resolve_timeout ?resolve_retries host ports =
   match Ipaddr.of_string host with
-  | Ok ip -> connect_ip t (List.map (fun p -> (ip, p)) ports)
+  | Ok ip ->
+    connect_ip t ?aaaa_timeout ?connect_delay ?connect_timeout
+      (List.map (fun p -> (ip, p)) ports)
   | Error _ ->
     let open Lwt_result.Infix in
     Lwt_result.lift
       (Result.bind (Domain_name.of_string host) Domain_name.host) >>= fun h ->
-    connect_host t h ports
+    connect_host t ?aaaa_timeout ?connect_delay ?connect_timeout
+      ?resolve_timeout ?resolve_retries h ports
