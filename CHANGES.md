@@ -1,3 +1,8 @@
+## v1.1.0 (2024-05-27)
+
+* Allow timeouts and delays in `connect`, `connect_ip`, `connect_host` to
+  overwrite the default from `create` (#42 @hannesm)
+
 ## v1.0.0 (2024-05-19)
 
 * Reverse dependency between dns-client-lwt and happy-eyeballs-lwt,
