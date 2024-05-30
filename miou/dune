@@ -1,0 +1,14 @@
+(library
+ (name happy_eyeballs_miou)
+ (modules happy_eyeballs_miou)
+ (public_name happy-eyeballs-miou)
+ (libraries
+  miou.unix
+  mtime.clock.os
+  ipaddr.unix
+  cstruct
+  tls-miou
+  dns
+  dns-client
+  happy-eyeballs
+  mirage-crypto-rng))
