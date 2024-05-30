@@ -4,3 +4,10 @@
  (modules test)
  (package happy-eyeballs-lwt)
  (libraries logs.fmt fmt.cli logs.cli fmt.tty cmdliner happy_eyeballs_lwt))
+
+(executable
+ (name example_with_miou)
+ (public_name happy_eyeballs_miou_client)
+ (modules example_with_miou)
+ (package happy-eyeballs-miou-unix)
+ (libraries logs.fmt fmt.cli logs.cli logs.threaded fmt.tty happy-eyeballs-miou-unix))
