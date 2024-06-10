@@ -6,9 +6,4 @@
   miou.unix
   mtime.clock.os
   ipaddr.unix
-  cstruct
-  tls-miou-unix
-  dns
-  dns-client
-  happy-eyeballs
-  mirage-crypto-rng))
+  happy-eyeballs))

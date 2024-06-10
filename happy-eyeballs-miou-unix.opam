@@ -11,11 +11,8 @@ depends: [
   "ocaml" {>= "5.0.0"}
   "dune" {>= "2.0.0"}
   "happy-eyeballs" {= version}
-  "miou" {>= "0.1.0"}
-  "tls-miou-unix"
+  "miou" {>= "0.2.0"}
   "duration"
-  "dns" {>= "7.0.0"}
-  "dns-client" {>= "7.0.0"}
   "domain-name"
   "ipaddr"
   "fmt"
@@ -32,8 +29,3 @@ Happy eyeballs is an implementation of RFC 8305 which specifies how to connect
 to a remote host using either IP protocol version 4 or IP protocol version 6.
 This uses Miou for side effects.
 """
-
-pin-depends: [
-  [ "miou.dev" "git+https://git.robur.coop/robur/miou.git#ed5087b832797616df073bd8ec9baed2ec4e474c" ]
-  [ "tls-miou-unix.0.17.4" "git+https://github.com/dinosaure/ocaml-tls.git#6b635d130b83bb45007e374d828f877332ab2b2e" ]
-]
