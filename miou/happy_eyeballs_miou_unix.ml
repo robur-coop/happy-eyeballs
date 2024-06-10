@@ -397,10 +397,6 @@ let rec wait value =
   | Connected (addr, fd) -> (addr, fd)
   | Failed msg -> failwith msg
 
-let same_address ipaddr' port' = function
-  | `Plaintext (ipaddr, port) -> Ipaddr.compare ipaddr ipaddr' = 0 && port = port'
-  | `Tls (_, ipaddr, port) -> Ipaddr.compare ipaddr ipaddr' = 0 && port = port'
-
 type daemon = unit Miou.t
 
 let create ?happy_eyeballs:(he= Happy_eyeballs.create (clock ())) ?(getaddrinfo= getaddrinfo)
