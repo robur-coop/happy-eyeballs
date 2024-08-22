@@ -7,7 +7,7 @@ freebsd_task:
       - OCAML_VERSION: 4.13.1
       - OCAML_VERSION: 4.14.2
 
-  pkg_install_script: pkg install -y ocaml-opam gmp gmake pkgconf bash
+  pkg_install_script: pkg install -y ocaml-opam gmp gmake pkgconf bash ca_root_nss
 
   ocaml_script:
     - opam init -a --comp=$OCAML_VERSION
