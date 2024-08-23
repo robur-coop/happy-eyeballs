@@ -1,3 +1,8 @@
+## v1.2.0 (2024-08-23)
+
+* Add the miou implementation of happy-eyeballs (@dinosaure, @hannesm, #41)
+* Fix the CirrusCI (@hannesm, #43)
+
 ## v1.1.0 (2024-05-27)
 
 * Allow timeouts and delays in `connect`, `connect_ip`, `connect_host` to
