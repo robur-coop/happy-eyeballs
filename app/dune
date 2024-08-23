@@ -6,8 +6,8 @@
  (libraries logs.fmt fmt.cli logs.cli fmt.tty cmdliner happy_eyeballs_lwt))
 
 (executable
- (name example_with_miou)
- (public_name happy_eyeballs_miou_client)
- (modules example_with_miou)
+ (name connect)
+ (public_name happy-eyeballs-miou-unix.connect)
+ (modules connect)
  (package happy-eyeballs-miou-unix)
- (libraries logs.fmt fmt.cli logs.cli logs.threaded fmt.tty happy-eyeballs-miou-unix))
+ (libraries cmdliner logs.fmt fmt.cli logs.cli logs.threaded fmt.tty happy-eyeballs-miou-unix))

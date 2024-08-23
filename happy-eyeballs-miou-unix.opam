@@ -18,6 +18,7 @@ depends: [
   "ipaddr"
   "fmt"
   "logs"
+  "cmdliner"
 ]
 build: [
   ["dune" "subst"] {dev}

@@ -368,7 +368,9 @@ let rec go t ~prms he () =
 
 let launch_daemon t he () =
   let prms = Miou.orphans () in
-  Miou.call (go t ~prms he)
+  if Miou.Domain.available () > 0
+  then Miou.call (go t ~prms he)
+  else Miou.async (go t ~prms he)
 
 let connect_ip ?aaaa_timeout ?connect_delay ?connect_timeout t addrs =
   let state = Miou.Computation.create () in
