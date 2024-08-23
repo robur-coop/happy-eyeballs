@@ -14,9 +14,9 @@ freebsd_task:
     - opam env
 
   pin_packages_script:
-    - opam install -y --deps-only -t .
-    - opam source dns-client
+    - opam pin add -y -t --with-version=dev happy-eyeballs.opam .
+    - opam pin add -y -t --with-version=dev happy-eyeballs-lwt.opam .
+    - opam pin add -y -t --with-version=dev happy-eyeballs-mirage.opam .
 
   build_script:
-    - opam install -y --deps-only -t dns dns-client dns-client-lwt dns-client-mirage
-    - opam exec -- dune build -p happy-eyeballs,happy-eyeballs-lwt,happy-eyeballs-mirage,dns,dns-client,dns-client-lwt,dns-client-mirage
+    - opam exec -- dune build -p happy-eyeballs,happy-eyeballs-lwt,happy-eyeballs-mirage
