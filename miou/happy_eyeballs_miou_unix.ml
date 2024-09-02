@@ -176,7 +176,7 @@ let handle_one_action t ~prms action =
         | _ -> assert false in
       let _ =
         Miou.async ~orphans:prms @@ fun () ->
-        match t.getaddrinfo `A host with
+        match t.getaddrinfo record host with
         | Ok result ->
           let ipv4, ipv6 = Ipaddr.Set.fold (fun ip (ipv4, ipv6) -> match ip with
             | Ipaddr.V4 v -> Ipaddr.V4.Set.add v ipv4, ipv6
