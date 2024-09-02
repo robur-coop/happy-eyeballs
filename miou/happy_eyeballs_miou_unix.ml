@@ -118,7 +118,7 @@ let try_connect t ~meta addr () =
     Miou.Queue.enqueue t.queue (`Connected (meta, socket));
     Miou.Condition.signal t.condition
   with Unix.Unix_error (err, _, _) ->
-    Logd.err (fun m ->
+    Logd.debug (fun m ->
         m "error connecting to %a: %s" pp_sockaddr addr (Unix.error_message err));
     Miou_unix.Ownership.close socket;
     let msg =
@@ -151,7 +151,7 @@ let handle_one_action t ~prms action =
   | Happy_eyeballs.Connect (host, id, attempt, addr) ->
       connect t ~prms host id attempt addr
   | Happy_eyeballs.Connect_failed (host, id, reason) ->
-      Logd.warn (fun m ->
+      Logd.debug (fun m ->
           m "connection to %a failed: %s" Domain_name.pp host reason);
       let cancel_connecting, others =
         Happy_eyeballs.Waiter_map.find_and_remove id t.cancel_connecting
@@ -229,7 +229,7 @@ let to_event t = function
       let () =
         match waiter with
         | None ->
-            Logd.warn (fun m -> m "Loose a connected socket to %a (%a) (%d:%d)" Domain_name.pp host
+            Logd.debug (fun m -> m "Loose a connected socket to %a (%a) (%d:%d)" Domain_name.pp host
               pp_sockaddr (to_sockaddr addr) (Obj.magic id) attempt);
             Miou_unix.Ownership.close fd
         | Some waiter ->
@@ -253,14 +253,14 @@ let to_event t = function
       Logd.debug (fun m -> m "%a resolved" Domain_name.pp host);
       Happy_eyeballs.Resolved_a (host, ips)
   | `Resolution_v4 (host, Error (`Msg msg)) ->
-      Logd.warn (fun m ->
+      Logd.debug (fun m ->
           m "impossible to resolve %a: %s" Domain_name.pp host msg);
       Happy_eyeballs.Resolved_a_failed (host, msg)
   | `Resolution_v6 (host, Ok ips) ->
       Logd.debug (fun m -> m "%a resolved" Domain_name.pp host);
       Happy_eyeballs.Resolved_aaaa (host, ips)
   | `Resolution_v6 (host, Error (`Msg msg)) ->
-      Logd.warn (fun m ->
+      Logd.debug (fun m ->
           m "impossible to resolve %a: %s" Domain_name.pp host msg);
       Happy_eyeballs.Resolved_aaaa_failed (host, msg)
 
