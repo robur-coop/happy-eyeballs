@@ -1,3 +1,8 @@
+## v1.2.1 (2024-09-04)
+
+* happy-eyeballs-miou-unix: fix AAAA record (@dinosaure, #45)
+* happy-eyeballs-miou-unix: demote log levels (@dinosaure, #45)
+
 ## v1.2.0 (2024-08-23)
 
 * Add the miou implementation of happy-eyeballs (@dinosaure, @hannesm, #41)
