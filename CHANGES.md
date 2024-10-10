@@ -1,3 +1,7 @@
+## v1.2.2 (2024-10-10)
+
+* Demote log message for Waiting_for_AAAA and Resolve_a (@reynir, #46)
+
 ## v1.2.1 (2024-09-04)
 
 * happy-eyeballs-miou-unix: fix AAAA record (@dinosaure, #45)
