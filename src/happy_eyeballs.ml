@@ -329,9 +329,9 @@ let event t now e =
                   Connect (name, id, c.attempt, dst) :: actions
                 | Resolving _ts -> Waiting_for_aaaa (now, ips), c.attempt, actions
                 | Waiting_for_aaaa (ts, ips') ->
-                  Logs.warn (fun m -> m "already waiting for AAAA with %a"
-                                Fmt.(list ~sep:(any ", ") Ipaddr.V4.pp)
-                                (Ipaddr.V4.Set.elements ips'));
+                  Log.warn (fun m -> m "already waiting for AAAA with %a"
+                               Fmt.(list ~sep:(any ", ") Ipaddr.V4.pp)
+                               (Ipaddr.V4.Set.elements ips'));
                   Waiting_for_aaaa (ts, Ipaddr.V4.Set.union ips' ips), c.attempt,
                   actions
                 | Connecting (ts, dst, dsts) ->
