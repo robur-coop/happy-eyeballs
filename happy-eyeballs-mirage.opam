@@ -32,3 +32,4 @@ Happy eyeballs is an implementation of RFC 8305 which specifies how to connect
 to a remote host using either IP protocol version 4 or IP protocol version 6.
 This uses Lwt and Mirage for side effects.
 """
+x-maintenance-intent: [ "(latest)" ]
