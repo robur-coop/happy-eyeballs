@@ -20,7 +20,6 @@ depends: [
   "mirage-mtime" {>= "4.0.0"}
   "tcpip" {>= "7.0.0"}
   "mirage-sleep" {>= "4.0.0"}
-  "mirage-crypto-rng" {>= "1.1.0"}
 ]
 build: [
   ["dune" "subst"] {dev}
