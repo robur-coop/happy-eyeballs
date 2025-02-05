@@ -47,7 +47,7 @@ module type S = sig
         @raise Failure if [ports] is the empty list. *)
 end
 
-module Make (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) (S : Tcpip.Stack.V4V6) : sig
+module Make (S : Tcpip.Stack.V4V6) : sig
   include S
     with type flow = S.TCP.flow
      and type stack = S.t

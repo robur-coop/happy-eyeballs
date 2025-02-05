@@ -37,7 +37,7 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 let ctr = ref 0
 
-module Make (T : Mirage_time.S) (C : Mirage_clock.MCLOCK) (S : Tcpip.Stack.V4V6) : sig
+module Make (S : Tcpip.Stack.V4V6) : sig
   include S
     with type flow = S.TCP.flow
      and type stack = S.t
@@ -184,7 +184,7 @@ end = struct
     end >>= function
     | Error _ -> Lwt.return_unit
     | Ok ev ->
-      let he, actions = Happy_eyeballs.event t.he (C.elapsed_ns ()) ev in
+      let he, actions = Happy_eyeballs.event t.he (Mirage_mtime.elapsed_ns ()) ev in
       t.he <- he;
       Lwt_list.iter_p (act t) actions
 
@@ -194,20 +194,20 @@ end = struct
   let rec timer t =
     let open Lwt.Infix in
     let rec loop () =
-      let he, cont, actions = Happy_eyeballs.timer t.he (C.elapsed_ns ()) in
+      let he, cont, actions = Happy_eyeballs.timer t.he (Mirage_mtime.elapsed_ns ()) in
       t.he <- he ;
       handle_timer_actions t actions ;
       match cont with
       | `Suspend ->
         timer t
       | `Act ->
-        T.sleep_ns t.timer_interval >>= fun () ->
+        Mirage_sleep.ns t.timer_interval >>= fun () ->
         loop ()
     in
     Lwt_condition.wait t.timer_condition >>= fun () ->
     loop ()
 
-  let create ?(happy_eyeballs = Happy_eyeballs.create (C.elapsed_ns ())) ?getaddrinfo ?(timer_interval = Duration.of_ms 10) stack =
+  let create ?(happy_eyeballs = Happy_eyeballs.create (Mirage_mtime.elapsed_ns ())) ?getaddrinfo ?(timer_interval = Duration.of_ms 10) stack =
     let waiters = Happy_eyeballs.Waiter_map.empty
     and cancel_connecting = Happy_eyeballs.Waiter_map.empty
     and timer_condition = Lwt_condition.create ()
@@ -229,7 +229,7 @@ end = struct
     let waiter, notify = Lwt.task () in
     let waiters, id = Happy_eyeballs.Waiter_map.register notify t.waiters in
     t.waiters <- waiters;
-    let ts = C.elapsed_ns () in
+    let ts = Mirage_mtime.elapsed_ns () in
     let he, actions =
       Happy_eyeballs.connect t.he ts ?aaaa_timeout ?connect_delay
         ?connect_timeout ?resolve_timeout ?resolve_retries ~id host ports
@@ -242,14 +242,14 @@ end = struct
     Log.debug (fun m -> m "[%u] connection %s to %a after %a"
                   t.counter (match r with Ok _ -> "ok" | Error _ -> "failed")
                   Domain_name.pp host
-                  Duration.pp (Int64.sub (C.elapsed_ns ()) ts));
+                  Duration.pp (Int64.sub (Mirage_mtime.elapsed_ns ()) ts));
     open_msg_error r
 
   let connect_ip t ?aaaa_timeout ?connect_delay ?connect_timeout addresses =
     let waiter, notify = Lwt.task () in
     let waiters, id = Happy_eyeballs.Waiter_map.register notify t.waiters in
     t.waiters <- waiters;
-    let ts = C.elapsed_ns () in
+    let ts = Mirage_mtime.elapsed_ns () in
     let he, actions =
       Happy_eyeballs.connect_ip t.he ts ?aaaa_timeout ?connect_delay
         ?connect_timeout ~id addresses
@@ -263,7 +263,7 @@ end = struct
                   t.counter (match r with Ok _ -> "ok" | Error _ -> "failed")
                   Fmt.(list ~sep:(any ", ") (pair ~sep:(any ":") Ipaddr.pp int))
                   addresses
-                  Duration.pp (Int64.sub (C.elapsed_ns ()) ts));
+                  Duration.pp (Int64.sub (Mirage_mtime.elapsed_ns ()) ts));
     open_msg_error r
 
   let connect t ?aaaa_timeout ?connect_delay ?connect_timeout
@@ -283,7 +283,7 @@ end = struct
     ?resolve_timeout ?resolve_retries ?timer_interval ?getaddrinfo stack =
     let happy_eyeballs =
       Happy_eyeballs.create ?aaaa_timeout ?connect_delay ?connect_timeout
-        ?resolve_timeout ?resolve_retries (C.elapsed_ns ())
+        ?resolve_timeout ?resolve_retries (Mirage_mtime.elapsed_ns ())
     in
     let happy_eyeballs = create ~happy_eyeballs ?getaddrinfo ?timer_interval stack in
     Lwt.return happy_eyeballs
