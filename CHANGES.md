@@ -1,3 +1,8 @@
+## v2.0.0 (2025-02-05)
+
+* Use mirage-sleep and mirage-mtime (dune variants) instead of functorising
+  over TIME and MCLOCK
+
 ## v1.2.2 (2024-10-10)
 
 * Demote log message for Waiting_for_AAAA and Resolve_a (@reynir, #46)
