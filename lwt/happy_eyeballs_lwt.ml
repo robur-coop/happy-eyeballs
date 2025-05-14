@@ -87,7 +87,10 @@ let rec act t action =
               set
           in
           Ok (Happy_eyeballs.Resolved_aaaa (host, Ipaddr.Set.fold fold set Ipaddr.V6.Set.empty))
-        | Error `Msg msg, _ -> Ok (Happy_eyeballs.Resolved_a_failed (host, msg))
+        | Error `Msg msg, `A ->
+          Ok (Happy_eyeballs.Resolved_a_failed (host, msg))
+        | Error `Msg msg, `AAAA ->
+          Ok (Happy_eyeballs.Resolved_aaaa_failed (host, msg))
       end
     | Happy_eyeballs.Connect (host, id, attempt, (ip, port)) ->
       begin
