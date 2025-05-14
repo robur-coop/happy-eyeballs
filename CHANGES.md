@@ -1,3 +1,9 @@
+## v2.0.1 (2025-05-14)
+
+* mirage & lwt: provide the appropriate event, Resolved_aaaa_failed, when IPv6
+  resolution failed. This fixes happy-eyeballs being stuck trying a connection
+  (#48 @hannesm)
+
 ## v2.0.0 (2025-02-05)
 
 * Use mirage-sleep and mirage-mtime (dune variants) instead of functorising
