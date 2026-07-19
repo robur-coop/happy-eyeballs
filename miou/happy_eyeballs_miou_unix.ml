@@ -18,7 +18,7 @@ let to_sockaddr (ipaddr, port) =
 
 let clock = Mtime_clock.elapsed_ns
 
-[@@@warning "-30"]
+[@@@warning "-duplicate-definitions"]
 
 type state = ((Ipaddr.t * int) * Unix.file_descr) Miou.Computation.t
 
@@ -55,7 +55,7 @@ type event =
     [ `host ] Domain_name.t * (Ipaddr.V6.Set.t, [ `Msg of string ]) result ]
 and getaddrinfo = [ `A | `AAAA ] -> [ `host ] Domain_name.t -> (Ipaddr.Set.t, [ `Msg of string ]) result
 
-[@@@warning "+30"]
+[@@@warning "+duplicate-definitions"]
 
 let getaddrinfo record domain_name =
   Logd.debug (fun m -> m "Resolve %a via the system's resolver" Domain_name.pp domain_name);
