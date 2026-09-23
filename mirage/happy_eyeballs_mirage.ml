@@ -37,6 +37,8 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 let ctr = ref 0
 
+let msgf fmt = Format.kasprintf (fun msg -> msg) fmt
+
 module Make (S : Tcpip.Stack.V4V6) : sig
   include S
     with type flow = S.TCP.flow
@@ -97,29 +99,27 @@ end = struct
             Lwt.return (Error ())
           | Some getaddrinfo ->
             getaddrinfo record host >|= fun res ->
-            match res, record with
-            | Ok set, `A ->
-              let fold ip set = match ip with
-                | Ipaddr.V4 ipv4 -> Ipaddr.V4.Set.add ipv4 set
-                | Ipaddr.V6 ipv6 ->
-                  Log.warn (fun m -> m "received the IPv6 address %a querying A of %a (ignoring)"
-                               Ipaddr.V6.pp ipv6 Domain_name.pp host);
-                  set
+            match res with
+            | Ok set ->
+              let ipv4s, ipv6s = Ipaddr.Set.fold (fun ip (ipv4s, ipv6s) ->
+                  match ip with
+                  | Ipaddr.V4 ipv4 -> Ipaddr.V4.Set.add ipv4 ipv4s, ipv6s
+                  | Ipaddr.V6 ipv6 -> ipv4s, Ipaddr.V6.Set.add ipv6 ipv6s)
+                  set Ipaddr.(V4.Set.empty, V6.Set.empty)
               in
-              Ok (Happy_eyeballs.Resolved_a (host, Ipaddr.Set.fold fold set Ipaddr.V4.Set.empty))
-            | Ok set, `AAAA ->
-              let fold ip set = match ip with
-                | Ipaddr.V6 ipv6 -> Ipaddr.V6.Set.add ipv6 set
-                | Ipaddr.V4 ipv4 ->
-                  Log.warn (fun m -> m "received the IPv4 address %a querying AAAA of %a (ignoring)"
-                               Ipaddr.V4.pp ipv4 Domain_name.pp host);
-                  set
-              in
-              Ok (Happy_eyeballs.Resolved_aaaa (host, Ipaddr.Set.fold fold set Ipaddr.V6.Set.empty))
-            | Error `Msg msg, `A ->
-              Ok (Happy_eyeballs.Resolved_a_failed (host, msg))
-            | Error `Msg msg, `AAAA ->
-              Ok (Happy_eyeballs.Resolved_aaaa_failed (host, msg))
+              (match record with
+               | `A ->
+                 if Ipaddr.V4.Set.is_empty ipv4s
+                 then Ok (Happy_eyeballs.Resolved_a_failed (host, msgf "%a unreachable via IPv4" Domain_name.pp host))
+                 else Ok (Happy_eyeballs.Resolved_a (host, ipv4s))
+               | `AAAA ->
+                 if Ipaddr.V6.Set.is_empty ipv6s
+                 then Ok (Happy_eyeballs.Resolved_aaaa_failed (host, msgf "%a unreachable via IPv6" Domain_name.pp host))
+                 else Ok (Happy_eyeballs.Resolved_aaaa (host, ipv6s)))
+            | Error `Msg msg ->
+              match record with
+              | `A -> Ok (Happy_eyeballs.Resolved_a_failed (host, msg))
+              | `AAAA -> Ok (Happy_eyeballs.Resolved_aaaa_failed (host, msg))
         end
       | Happy_eyeballs.Connect (host, id, attempt, addr) ->
         begin
