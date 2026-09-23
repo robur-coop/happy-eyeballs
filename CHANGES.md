@@ -1,3 +1,9 @@
+## v2.0.2 (2026-09-23)
+
+* mirage & lwt: DNS resolution ensure that the IP sets are non-empty
+  (#50 @hannesm)
+* use warning name instead of number (#49 @hannesm)
+
 ## v2.0.1 (2025-05-14)
 
 * mirage & lwt: provide the appropriate event, Resolved_aaaa_failed, when IPv6
