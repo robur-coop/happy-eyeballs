@@ -327,6 +327,8 @@ let event t now e =
                   let dst, dsts = expand_list_split ips c.ports in
                   Connecting (now, [ dst ], dsts), c.attempt + 1,
                   Connect (name, id, c.attempt, dst) :: actions
+                | Resolving _ts when Ipaddr.V4.Set.is_empty ips ->
+                  c.state, c.attempt, actions
                 | Resolving _ts -> Waiting_for_aaaa (now, ips), c.attempt, actions
                 | Waiting_for_aaaa (ts, ips') ->
                   Log.debug (fun m -> m "%a already waiting for AAAA with %a"
