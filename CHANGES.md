@@ -1,3 +1,8 @@
+## v2.1.0 (2026-10-21)
+
+* relicense to AGPL 3 or later (#53 @reynir @dinosaure @hannesm)
+* handle Resolved_a/Resolved_aaaa with an IP set as error (#52 @hannesm)
+
 ## v2.0.2 (2026-09-23)
 
 * mirage & lwt: DNS resolution ensure that the IP sets are non-empty
