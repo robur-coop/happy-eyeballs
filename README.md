@@ -12,7 +12,8 @@ The implemented [state machine](https://data.robur.coop/happy_eyeballs.pdf) is
 kept in-sync with the code (source: happy_eyeballs.dot at the root of this
 repository).
 
-It is licensed under the ISC license.
+It is licensed under the AGPL-3.0 or later. If you want to pay for a more
+permissive license, reach out to team@robur.coop.
 
 ### Installation
 
