@@ -310,8 +310,58 @@ let connect_ip t now ?aaaa_timeout ?connect_delay ?connect_timeout ~id dsts =
 
 let event t now e =
   Log.debug (fun m -> m "[%u] received event %a" t.counter pp_event e);
+  let resolve_a_failed name reason =
+    let conns, actions =
+      match Domain_name.Host_map.find name t.conns with
+      | None -> t.conns, []
+      | Some cs ->
+        let cs, actions = IM.fold (fun id c (cs, actions) ->
+            let resolved = resolve c.resolved `v4 in
+            match c.state with
+            | Resolving _ts when resolved = `both ->
+              cs, Connect_failed (name, id, reason) :: actions
+            | _ -> IM.add id { c with resolved } cs, actions)
+            cs (IM.empty, [])
+        in
+        (if IM.is_empty cs then
+           Domain_name.Host_map.remove name t.conns
+         else
+           Domain_name.Host_map.add name cs t.conns), actions
+    in
+    { t with conns }, actions
+  and resolve_aaaa_failed name reason =
+    let conns, actions =
+      match Domain_name.Host_map.find name t.conns with
+      | None -> t.conns, []
+      | Some cs ->
+        let cs, actions = IM.fold (fun id c (cs, actions) ->
+            let resolved = resolve c.resolved `v6 in
+            match c.state with
+            | Resolving _ts when resolved = `both ->
+              cs, Connect_failed (name, id, reason) :: actions
+            | Waiting_for_aaaa (_ts, ips) ->
+              let ips =
+                List.map (fun ip -> Ipaddr.V4 ip) (Ipaddr.V4.Set.elements ips)
+              in
+              let dst, dsts = expand_list_split ips c.ports in
+              let state = Connecting (now, [ dst ], dsts) in
+              let attempt = c.attempt + 1 in
+              IM.add id { c with state ; resolved ; attempt } cs,
+              Connect (name, id, c.attempt, dst) :: actions
+            | _ -> IM.add id { c with resolved } cs, actions)
+            cs (IM.empty, [])
+        in
+        (if IM.is_empty cs then
+           Domain_name.Host_map.remove name t.conns
+         else
+           Domain_name.Host_map.add name cs t.conns), actions
+    in
+    { t with conns }, actions
+  in
   let t, actions =
     match e with
+    | Resolved_a (name, ips) when Ipaddr.V4.Set.is_empty ips ->
+      resolve_a_failed name "couldn't get any A record"
     | Resolved_a (name, ips) ->
       let conns, actions =
         match Domain_name.Host_map.find name t.conns with
@@ -327,8 +377,6 @@ let event t now e =
                   let dst, dsts = expand_list_split ips c.ports in
                   Connecting (now, [ dst ], dsts), c.attempt + 1,
                   Connect (name, id, c.attempt, dst) :: actions
-                | Resolving _ts when Ipaddr.V4.Set.is_empty ips ->
-                  c.state, c.attempt, actions
                 | Resolving _ts -> Waiting_for_aaaa (now, ips), c.attempt, actions
                 | Waiting_for_aaaa (ts, ips') ->
                   Log.debug (fun m -> m "%a already waiting for AAAA with %a"
@@ -348,24 +396,9 @@ let event t now e =
       in
       { t with conns }, actions
     | Resolved_a_failed (name, reason) ->
-      let conns, actions =
-        match Domain_name.Host_map.find name t.conns with
-        | None -> t.conns, []
-        | Some cs ->
-          let cs, actions = IM.fold (fun id c (cs, actions) ->
-              let resolved = resolve c.resolved `v4 in
-              match c.state with
-              | Resolving _ts when resolved = `both ->
-                cs, Connect_failed (name, id, reason) :: actions
-              | _ -> IM.add id { c with resolved } cs, actions)
-              cs (IM.empty, [])
-          in
-          (if IM.is_empty cs then
-             Domain_name.Host_map.remove name t.conns
-           else
-             Domain_name.Host_map.add name cs t.conns), actions
-      in
-      { t with conns }, actions
+      resolve_a_failed name reason
+    | Resolved_aaaa (name, ips) when Ipaddr.V6.Set.is_empty ips ->
+      resolve_aaaa_failed name "couldn't get any AAAA record"
     | Resolved_aaaa (name, ips) ->
       let conns, actions =
         match Domain_name.Host_map.find name t.conns with
@@ -395,33 +428,7 @@ let event t now e =
       in
       { t with conns }, actions
     | Resolved_aaaa_failed (name, reason) ->
-      let conns, actions =
-        match Domain_name.Host_map.find name t.conns with
-        | None -> t.conns, []
-        | Some cs ->
-          let cs, actions = IM.fold (fun id c (cs, actions) ->
-              let resolved = resolve c.resolved `v6 in
-              match c.state with
-              | Resolving _ts when resolved = `both ->
-                cs, Connect_failed (name, id, reason) :: actions
-              | Waiting_for_aaaa (_ts, ips) ->
-                let ips =
-                  List.map (fun ip -> Ipaddr.V4 ip) (Ipaddr.V4.Set.elements ips)
-                in
-                let dst, dsts = expand_list_split ips c.ports in
-                let state = Connecting (now, [ dst ], dsts) in
-                let attempt = c.attempt + 1 in
-                IM.add id { c with state ; resolved ; attempt } cs,
-                Connect (name, id, c.attempt, dst) :: actions
-              | _ -> IM.add id { c with resolved } cs, actions)
-              cs (IM.empty, [])
-          in
-          (if IM.is_empty cs then
-             Domain_name.Host_map.remove name t.conns
-           else
-             Domain_name.Host_map.add name cs t.conns), actions
-      in
-      { t with conns }, actions
+      resolve_aaaa_failed name reason
     | Connection_failed (name, id, (ip, port), reason) ->
       let conns, actions =
         match Domain_name.Host_map.find name t.conns with
